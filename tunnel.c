@@ -36,9 +36,11 @@ loop(rudp_queue_t *queue){
       // send waiting packets
       if(rudp_queue_t *queue) {
         rudp_queue_t *head = queue;
-        sendto(sockfd, head->data, head->length, head->addr, sizeof(head->addr));
-        queue = head->next;
-        free(head);
+        if(head != NULL) {
+          sendto(sockfd, head->data, head->length, head->addr, sizeof(head->addr));
+          queue = head->next;
+          free(head);
+        }
       }
     }
   }
