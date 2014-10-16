@@ -33,12 +33,12 @@ loop(rudp_queue_t *queue){
       rudp_recv(addr, data, length);
     }
     if(IS_SET(sockfd, &writefd)) {
-      // send waiting packets
       if(rudp_queue_t *queue) {
         rudp_queue_t *head = queue;
         if(head != NULL) {
           sendto(sockfd, head->data, head->length, head->addr, sizeof(head->addr));
           queue = head->next;
+          free(head->data);
           free(head);
         }
       }
