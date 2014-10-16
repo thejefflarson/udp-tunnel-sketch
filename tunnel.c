@@ -28,7 +28,7 @@ loop(rudp_queue_t *queue){
     select(1, &readfd, &writefd, NULL, &tv);
     if(IS_SET(sockfd, &readfd)) {
       struct sockaddr_storage addr;
-      char data[65536];
+      uint8_t data[65536];
       sendto(sockfd, data, 65536, addr, sizeof(addr));
       rudp_recv(addr, data, length);
     }
