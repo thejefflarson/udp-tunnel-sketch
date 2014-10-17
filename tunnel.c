@@ -2,7 +2,6 @@ const uint8_t HELLO = (1 << 0);
 const uint8_t HI    = (1 << 1);
 const uint8_t ACK   = (1 << 2);
 const uint8_t DATA  = (1 << 3);
-uint16_t seq = 0;
 int sockfd;
 
 typedef struct rudp_queue {
@@ -51,6 +50,7 @@ rudp_send(struct sockaddr_storage addr, uint8_t *data, int length) {
   rudp_queue_t *tail = queue;
   if(tail == NULL) {
     tail = calloc(1, sizeof(rudp_queue_t));
+    queue = tail;
   } else {
     while(tail->next != NULL) tail = tail->next;
     tail->next = calloc(1, sizeof(rudp_queue_t));
