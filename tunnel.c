@@ -1,3 +1,4 @@
+#include <memory.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -7,9 +8,9 @@
 
 const uint8_t HELLO = (1 << 0);
 const uint8_t HI    = (1 << 1);
-const uint8_t ACK   = (1 << 2);
-const uint8_t DATA  = (1 << 3);
+const uint8_t DATA  = (1 << 2);
 int sockfd;
+uint16_t seq = 0;
 
 typedef struct rudp_queue {
   struct sockaddr_storage addr;
@@ -20,9 +21,10 @@ typedef struct rudp_queue {
 
 rudp_queue_t *queue = NULL;
 
-void
+int
 rudp_recv(struct sockaddr_storage addr, uint8_t *data, int length);
-void
+
+int
 rudp_send(struct sockaddr_storage addr, uint8_t *data, int length);
 
 void
@@ -47,6 +49,7 @@ loop(rudp_queue_t *queue){
       if(queue != NULL) {
         rudp_queue_t *head = queue;
         if(head != NULL) {
+          // todo: keep sending until acked
           sendto(sockfd, head->data, head->length, 0, (struct sockaddr *) &head->addr, sizeof(head->addr));
           queue = head->next;
           free(head->data);
@@ -73,15 +76,24 @@ rudp_send(struct sockaddr_storage addr, uint8_t *data, int length) {
   tail->length = length;
 }
 
-void
+int
 rudp_recv(struct sockaddr_storage addr, uint8_t *data, int length) {
+  size_t hlen = sizeof(uint8_t) + sizeof(uint16_t) + sizeof(uint32_t);
+  if(length < hlen) return -1;
   uint8_t flags = *data;
-  uint8_t ack   = flags & ACK;
-  flags        &= ~ACK; // clear the ACK bit
-  // if statements here
+  uint16_t *ack = (uint16_t *)data + 1;
   switch(flags) {
-    case HELLO:
-      rudp_send(addr, data, length);
+    case HELLO:;
+      size_t length = 1; // protocol
+      length += sizeof(uint32_t); // ack number
+      length += sizeof(uint32_t); // seq number
+      length += sizeof(uint8_t) * 32; // public key
+      uint8_t *reply = calloc(1 * 4 * 32, sizeof(uint8_t));
+      reply[0] = HI;
+      memcpy(reply + 1, ack, sizeof(*ack));
+      seq++;
+      memcpy(reply + 1 + sizeof(ack), &seq, sizeof(seq));
+      rudp_send(addr, reply, length);
       break;
     case HI:
       rudp_send(addr, data, length);
