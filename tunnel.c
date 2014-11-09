@@ -13,7 +13,6 @@ const uint8_t HI    = (1 << 1); // ack pubkey
 const uint8_t BYE   = (1 << 2); // close
 const uint8_t DATA  = (1 << 3); // encrypted data
 
-
 int sockfd;
 uint16_t seq = 0;
 
@@ -25,8 +24,9 @@ typedef struct rudp_queue {
 } rudp_queue_t;
 
 rudp_queue_t *queue = NULL;
-uint8_t their_key[crypto_secretbox_KEYBYTES] = {0};
-uint8_t our_key[crypto_secretbox_KEYBYTES] = {0};
+uint8_t their_key[crypto_box_PUBLICKEYBYTES] = {0};
+uint8_t pk[crypto_box_PUBLICKEYBYTES] = {0};
+uint8_t sk[crypto_box_SECRETKEYBYTES] = {0};
 
 int
 rudp_recv(struct sockaddr_storage addr, uint8_t *data, int length);
@@ -89,29 +89,18 @@ rudp_recv(struct sockaddr_storage addr, uint8_t *data, int length) {
   size_t len;
   uint8_t flags = *data;
   switch(flags) {
+    case HI:
     case HELLO:
       len = sizeof(their_key) + sizeof(HELLO);
       if(length < len) return -1;
       memcpy(their_key, data + 1, sizeof(their_key));
-      len = sizeof(their_key) + sizeof(HI);
-      len += crypto_secretbox_NONCEBYTES + crypto_secretbox_BOXZEROBYTES;
-      uint8_t *reply = calloc(len, sizeof(uint8_t));
-      reply[0] = HI;
-      reply += sizeof(HI);
-      uint16_t nack = htons(0);
-      memcpy(reply, &nack, sizeof(nack));
-      reply += sizeof(nack);
-      seq++;
-      uint16_t nseq = htons(seq);
-      memcpy(reply + 1 + sizeof(seq), &nseq, sizeof(nseq));
-      reply += sizeof(seq);
-      // encrypt our_key;
-      rudp_send(addr, reply, len);
-      break;
-    case HI:;
-      size_t len = crypto_secretbox_KEYBYTES;
-      if(length < len) return -1;
-      // decrypt our_key and ensure it is the same
+      if(flags == HELLO) {
+        uint8_t *reply = calloc(len, sizeof(uint8_t));
+        reply[0] = HI;
+        crypto_box_keypair(pk, sk);
+        memcpy(reply + sizeof(HI), pk, sizeof(pk));
+        rudp_send(addr, reply, len);
+      }
       break;
     case DATA:;
       uint16_t ack = ntohs(*(uint16_t *)(data + 1));
