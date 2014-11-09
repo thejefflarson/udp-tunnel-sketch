@@ -100,6 +100,8 @@ rudp_recv(struct sockaddr_storage addr, uint8_t *data, int length) {
         crypto_box_keypair(pk, sk);
         memcpy(reply + sizeof(HI), pk, sizeof(pk));
         rudp_send(addr, reply, len);
+      } else if(flags == HI) {
+        // send empty data
       }
       break;
     case DATA:;
