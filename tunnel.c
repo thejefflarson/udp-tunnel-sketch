@@ -16,6 +16,7 @@ const uint8_t DATA  = (1 << 3); // encrypted data
 int sockfd;
 uint16_t seq = 0;
 
+
 typedef struct rudp_queue {
   struct sockaddr_storage addr;
   uint8_t *data;
@@ -88,6 +89,7 @@ int
 rudp_recv(struct sockaddr_storage addr, uint8_t *data, int length) {
   size_t len;
   uint8_t flags = *data;
+  uint8_t *reply;
   switch(flags) {
     case HI:
     case HELLO:
@@ -95,13 +97,31 @@ rudp_recv(struct sockaddr_storage addr, uint8_t *data, int length) {
       if(length < len) return -1;
       memcpy(their_key, data + 1, sizeof(their_key));
       if(flags == HELLO) {
-        uint8_t *reply = calloc(len, sizeof(uint8_t));
+        reply = calloc(len, sizeof(uint8_t));
         reply[0] = HI;
         crypto_box_keypair(pk, sk);
         memcpy(reply + sizeof(HI), pk, sizeof(pk));
+        rudp_send(addr, reply, len); // needs to be a simple list insert
+      } else { // HI
+        // needs to be a seal function
+        size_t plen = sizeof(seq) * 2;
+        uint8_t *plain = calloc(plen, sizeof(uint8_t));
+        uint16_t nseq = htons(seq);
+        memcpy(plain, &nseq, sizeof(nseq));
+        memcpy(plain + sizeof(nseq), &nseq, sizeof(nseq));
+        size_t clen = len + crypto_box_ZEROBYTES;
+        uint8_t *cipher = calloc(clen, sizeof(uint8_t));
+        uint8_t *nonce = calloc(crypto_box_ZEROBYTES, sizeof(uint8_t));
+        randombytes(nonce, crypto_box_NONCEBYTES);
+        crypto_box(cipher, plain, sizeof(plain), nonce, their_key, sk);
+        len = sizeof(plain) + sizeof(DATA) + crypto_box_BOXZEROBYTES + crypto_box_NONCEBYTES;
+        reply = calloc(len, sizeof(uint8_t));
+        reply[0] = DATA;
+        clen -= crypto_box_BOXZEROBYTES;
+        memcpy(reply + sizeof(data), cipher + crypto_box_BOXZEROBYTES, clen);
+        memcpy(reply + sizeof(data) + clen, nonce, crypto_box_NONCEBYTES);
         rudp_send(addr, reply, len);
-      } else if(flags == HI) {
-        // send empty data
+        // end seal function
       }
       break;
     case DATA:;
