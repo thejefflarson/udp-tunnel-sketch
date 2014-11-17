@@ -153,6 +153,13 @@ rudp_recv(struct sockaddr_storage addr, uint8_t *data, int length) {
         reply->connid = ntohl(*(data + 1));
         crypto_box_keypair(pk, sk);
         memcpy(reply + sizeof(uint16_t) + sizeof(HI), pk, sizeof(pk));
+        rudp_queue_t *q = queue;
+        while(q) {
+          if(q->packet->proto == HI) {
+            // delete q
+          }
+          q = q->next;
+        }
         queue_packet(addr, (rudp_packet *)reply); // needs to be a simple list insert
       } else { // HI
         rudp_data_packet *reply = calloc(1, sizeof(rudp_data_packet));
@@ -166,7 +173,11 @@ rudp_recv(struct sockaddr_storage addr, uint8_t *data, int length) {
       break;
     case DATA:{
       uint16_t ack = ntohs(*(uint16_t *)(data + 1));
-
+      rudp_queue_t *q = queue;
+      while(q) {
+        // delete ack
+        q = q->next;
+      };
       break;
     }
     default:
