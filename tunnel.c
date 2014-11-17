@@ -1,5 +1,6 @@
 #include <arpa/inet.h>
 #include <memory.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -16,16 +17,15 @@ const uint8_t DATA  = (1 << 3); // encrypted data
 int sockfd;
 uint16_t seq = 0;
 
-
 typedef struct {
   uint8_t proto;
-} rudp_packet;
+} rudp_packet_t;
 
 typedef struct {
   uint8_t proto;
   uint16_t connid;
   uint8_t pk[crypto_box_PUBLICKEYBYTES];
-} __attribute__((packed)) rudp_conn_packet;
+} __attribute__((packed)) rudp_conn_packet_t;
 
 typedef struct {
   uint8_t proto;
@@ -34,15 +34,33 @@ typedef struct {
   uint16_t connid;
   uint8_t *data;
   size_t *length;
-} rudp_data_packet;
+} rudp_data_packet_t;
 
-typedef struct rudp_queue {
+typedef struct {
   struct sockaddr_storage addr;
-  rudp_packet *packet;
-  struct rudp_queue *next;
-} rudp_queue_t;
+  rudp_packet_t *packets[1024];
+} rudp_circular_buffer_t;
 
-rudp_queue_t *queue = NULL;
+rudp_circular_buffer_t in;
+rudp_circular_buffer_t out;
+
+void
+buffer_put(rudp_circular_buffer_t *buf, rudp_packet_t *packet, size_t index){
+  buf->packets[1024 % index] = packet;
+}
+
+rudp_packet_t *
+buffer_get(rudp_circular_buffer_t *buf, size_t index){
+  return buf->packets[1024 % index];
+}
+
+rudp_packet_t *
+buffer_delete(rudp_circular_buffer_t *buf, size_t index){
+  rudp_packet_t *packet = buffer_get(buf, index);
+  buf->packets[1024 % index] = NULL;
+  return packet;
+}
+
 uint8_t their_key[crypto_box_PUBLICKEYBYTES] = {0};
 uint8_t pk[crypto_box_PUBLICKEYBYTES] = {0};
 uint8_t sk[crypto_box_SECRETKEYBYTES] = {0};
@@ -54,7 +72,7 @@ int
 rudp_send(struct sockaddr_storage addr, uint8_t *data, int length);
 
 void
-loop(rudp_queue_t *queue){
+loop(){
   fd_set readfd, writefd;
   FD_ZERO(&readfd);
   FD_ZERO(&writefd);
@@ -63,7 +81,7 @@ loop(rudp_queue_t *queue){
   while(1) {
     struct timeval tv;
     tv.tv_sec  = 0;
-    tv.tv_usec = 0;
+    tv.tv_usec = 50;
     select(1, &readfd, &writefd, NULL, &tv);
     if(FD_ISSET(sockfd, &readfd)) {
       struct sockaddr_storage addr;
@@ -73,61 +91,35 @@ loop(rudp_queue_t *queue){
       rudp_recv(addr, data, length);
     }
     if(FD_ISSET(sockfd, &writefd)) {
-      if(queue != NULL) {
-        rudp_queue_t *head = queue;
-        if(head != NULL) {
-          uint8_t *reply = calloc(1, sizeof(uint8_t));
-          size_t length = 0;
-          // something like this
-          // size_t plen = sizeof(seq) * 2;
-          // uint8_t *plain = calloc(plen, sizeof(uint8_t));
-          // uint16_t nseq = htons(seq);
-          // memcpy(plain, &nseq, sizeof(nseq));
-          // memcpy(plain + sizeof(nseq), &nseq, sizeof(nseq));
-          // size_t clen = len + crypto_box_ZEROBYTES;
-          // uint8_t *cipher = calloc(clen, sizeof(uint8_t));
-          // uint8_t *nonce = calloc(crypto_box_ZEROBYTES, sizeof(uint8_t));
-          // randombytes(nonce, crypto_box_NONCEBYTES);
-          // crypto_box(cipher, plain, sizeof(plain), nonce, their_key, sk);
-          // len = sizeof(plain) + sizeof(DATA) + crypto_box_BOXZEROBYTES + crypto_box_NONCEBYTES;
-          // reply = calloc(len, sizeof(uint8_t));
-          // reply[0] = DATA;
-          // clen -= crypto_box_BOXZEROBYTES;
-          // memcpy(reply + sizeof(data), cipher + crypto_box_BOXZEROBYTES, clen);
-          // memcpy(reply + sizeof(data) + clen, nonce, crypto_box_NONCEBYTES);
-          // todo: keep sending until acked
-          sendto(sockfd, reply, length, 0, (struct sockaddr *) &head->addr, sizeof(head->addr));
-          queue = head->next;
-          free(reply);
-          if(head->packet->proto == DATA && ((rudp_data_packet *)head->packet)->data) {
-            free(((rudp_data_packet *)head->packet)->data);
-          }
-          free(head->packet);
-          free(head);
-        }
-      }
+      rudp_packet_t *packet = buffer_get(&out, seq);
+      uint8_t *reply = calloc(1, sizeof(uint8_t));
+      size_t length = 0;
+        // something like this
+        // size_t plen = sizeof(seq) * 2;
+        // uint8_t *plain = calloc(plen, sizeof(uint8_t));
+        // uint16_t nseq = htons(seq);
+        // memcpy(plain, &nseq, sizeof(nseq));
+        // memcpy(plain + sizeof(nseq), &nseq, sizeof(nseq));
+        // size_t clen = len + crypto_box_ZEROBYTES;
+        // uint8_t *cipher = calloc(clen, sizeof(uint8_t));
+        // uint8_t *nonce = calloc(crypto_box_ZEROBYTES, sizeof(uint8_t));
+        // randombytes(nonce, crypto_box_NONCEBYTES);
+        // crypto_box(cipher, plain, sizeof(plain), nonce, their_key, sk);
+        // len = sizeof(plain) + sizeof(DATA) + crypto_box_BOXZEROBYTES + crypto_box_NONCEBYTES;
+        // reply = calloc(len, sizeof(uint8_t));
+        // reply[0] = DATA;
+        // clen -= crypto_box_BOXZEROBYTES;
+        // memcpy(reply + sizeof(data), cipher + crypto_box_BOXZEROBYTES, clen);
+        // memcpy(reply + sizeof(data) + clen, nonce, crypto_box_NONCEBYTES);
+        // todo: keep sending until acked
+      sendto(sockfd, reply, length, 0, (struct sockaddr *) addr, sizeof(addr));
+      free(reply);
     }
   }
 }
 
 int
 rudp_connect(struct sockaddr_storage addr) {
-  return 0;
-}
-
-int
-queue_packet(struct sockaddr_storage addr, rudp_packet *packet) {
-  rudp_queue_t *tail = queue;
-  if(tail == NULL) {
-    tail = (rudp_queue_t *)calloc(1, sizeof(rudp_queue_t));
-    queue = tail;
-  } else {
-    while(tail->next != NULL) tail = tail->next;
-    tail->next = (rudp_queue_t *)calloc(1, sizeof(rudp_queue_t));
-    tail = tail->next;
-  }
-  tail->addr = addr;
-  tail->packet = packet;
   return 0;
 }
 
@@ -148,36 +140,27 @@ rudp_recv(struct sockaddr_storage addr, uint8_t *data, int length) {
       if(length < len) return -1;
       memcpy(their_key, data + 1, sizeof(their_key));
       if(flags == HELLO) {
-        rudp_conn_packet *reply = calloc(1, sizeof(rudp_conn_packet));
+        rudp_conn_packet_t *reply = calloc(1, sizeof(rudp_conn_packet_t));
         reply->proto  = HI;
         reply->connid = ntohl(*(data + 1));
         crypto_box_keypair(pk, sk);
         memcpy(reply + sizeof(uint16_t) + sizeof(HI), pk, sizeof(pk));
-        rudp_queue_t *q = queue;
-        while(q) {
-          if(q->packet->proto == HI) {
-            // delete q
-          }
-          q = q->next;
-        }
-        queue_packet(addr, (rudp_packet *)reply); // needs to be a simple list insert
+        buffer_put(&out, (rudp_packet_t *)reply, 0); // needs to be a simple list insert
       } else { // HI
-        rudp_data_packet *reply = calloc(1, sizeof(rudp_data_packet));
+        rudp_data_packet_t *reply = calloc(1, sizeof(rudp_data_packet_t));
         reply->proto = DATA;
         reply->seq = htons(seq);
         reply->ack = htons(seq);
         reply->data = NULL;
         reply->length = 0;
-        queue_packet(addr, (rudp_packet *)reply); // needs to be a simple list insert
+
+        buffer_put(&out, (rudp_packet_t *)reply, seq);// needs to be a simple list insert
+        rudp_conn_packet_t *hi = (rudp_conn_packet_t *)buffer_delete(&out, 0);
+        free(hi);
       }
       break;
     case DATA:{
       uint16_t ack = ntohs(*(uint16_t *)(data + 1));
-      rudp_queue_t *q = queue;
-      while(q) {
-        // delete ack
-        q = q->next;
-      };
       break;
     }
     default:
