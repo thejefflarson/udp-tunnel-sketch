@@ -16,6 +16,7 @@ const uint8_t DATA  = (1 << 3); // encrypted data
 
 int sockfd;
 uint16_t seq = 0;
+uint16_t ack = 0;
 
 typedef struct {
   uint8_t proto;
@@ -102,7 +103,7 @@ loop(){
       rudp_recv(addr, data, length);
     }
     if(FD_ISSET(sockfd, &writefd)) {
-      rudp_packet_t *packet = buffer_get(&out, seq);
+      rudp_packet_t *packet = buffer_get(&out, ack + 1);
       uint8_t *reply = calloc(1, sizeof(uint8_t));
       size_t length = 0;
         // something like this
@@ -156,12 +157,14 @@ rudp_recv(struct sockaddr_storage addr, uint8_t *data, int length) {
         reply->connid = ntohl(*(data + 1));
         crypto_box_keypair(pk, sk);
         memcpy(reply + sizeof(uint16_t) + sizeof(HI), pk, sizeof(pk));
-        buffer_put(&out, (rudp_packet_t *)reply, 0); // needs to be a simple list insert
+        buffer_put(&out, (rudp_packet_t *)reply, seq); // needs to be a simple list insert
       } else { // HI
+        seq++;
         rudp_data_packet_t *reply = calloc(1, sizeof(rudp_data_packet_t));
         reply->proto = DATA;
         reply->seq = htons(seq);
-        reply->ack = htons(seq);
+        ack = seq - 1;
+        reply->ack = htons(seq - 1);
         reply->data = NULL;
         reply->length = 0;
         buffer_put(&out, (rudp_packet_t *)reply, seq);// needs to be a simple list insert
@@ -170,7 +173,7 @@ rudp_recv(struct sockaddr_storage addr, uint8_t *data, int length) {
       }
       break;
     case DATA:{
-      uint16_t ack = ntohs(*(uint16_t *)(data + 1));
+      ack = ntohs(*(uint16_t *)(data + 1));
       break;
     }
     default:
