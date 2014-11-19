@@ -36,9 +36,12 @@ typedef struct {
   size_t *length;
 } rudp_data_packet_t;
 
+// 1k packets per connection -- can buffer ~1.5mb total
+#define BUFFER_SIZE 1024
 typedef struct {
   struct sockaddr_storage addr;
-  rudp_packet_t *packets[1024];
+  rudp_packet_t *packets[BUFFER_SIZE];
+  uint16_t size;
 } rudp_circular_buffer_t;
 
 rudp_circular_buffer_t in;
@@ -46,20 +49,28 @@ rudp_circular_buffer_t out;
 
 void
 buffer_put(rudp_circular_buffer_t *buf, rudp_packet_t *packet, size_t index){
-  buf->packets[1024 % index] = packet;
+  buf->packets[index % BUFFER_SIZE] = packet;
+  buf->size++;
 }
 
 rudp_packet_t *
 buffer_get(rudp_circular_buffer_t *buf, size_t index){
-  return buf->packets[1024 % index];
+  return buf->packets[index % BUFFER_SIZE];
 }
 
 rudp_packet_t *
 buffer_delete(rudp_circular_buffer_t *buf, size_t index){
   rudp_packet_t *packet = buffer_get(buf, index);
-  buf->packets[1024 % index] = NULL;
+  buf->packets[index % BUFFER_SIZE] = NULL;
+  buf->size--;
   return packet;
 }
+
+bool
+has_space(rudp_circular_buffer_t *buf) {
+  return buf->size <= BUFFER_SIZE;
+}
+#undef BUFFER_SIZE
 
 uint8_t their_key[crypto_box_PUBLICKEYBYTES] = {0};
 uint8_t pk[crypto_box_PUBLICKEYBYTES] = {0};
@@ -153,7 +164,6 @@ rudp_recv(struct sockaddr_storage addr, uint8_t *data, int length) {
         reply->ack = htons(seq);
         reply->data = NULL;
         reply->length = 0;
-
         buffer_put(&out, (rudp_packet_t *)reply, seq);// needs to be a simple list insert
         rudp_conn_packet_t *hi = (rudp_conn_packet_t *)buffer_delete(&out, 0);
         free(hi);
