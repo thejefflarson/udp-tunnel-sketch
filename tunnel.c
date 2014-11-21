@@ -91,10 +91,7 @@ loop(){
   FD_SET(sockfd, &readfd);
   FD_SET(sockfd, &writefd);
   while(1) {
-    struct timeval tv;
-    tv.tv_sec  = 0;
-    tv.tv_usec = 50;
-    select(1, &readfd, &writefd, NULL, &tv);
+    select(sockfd + 1, &readfd, &writefd, NULL, NULL);
     if(FD_ISSET(sockfd, &readfd)) {
       struct sockaddr_storage addr;
       uint8_t data[65536];
@@ -173,7 +170,9 @@ rudp_recv(struct sockaddr_storage addr, uint8_t *data, int length) {
       }
       break;
     case DATA:{
-      ack = ntohs(*(uint16_t *)(data + 1));
+      uint16_t pack = ntohs(*(uint16_t *)(data + 1));
+      if(pack == ack + 1) ack = pack;
+
       break;
     }
     default:
