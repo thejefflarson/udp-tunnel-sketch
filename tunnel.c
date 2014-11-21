@@ -94,9 +94,9 @@ loop(){
     select(sockfd + 1, &readfd, &writefd, NULL, NULL);
     if(FD_ISSET(sockfd, &readfd)) {
       struct sockaddr_storage addr;
-      uint8_t data[65536];
+      uint8_t data[1472];
       socklen_t size;
-      ssize_t length = recvfrom(sockfd, data, 65536, 0, (struct sockaddr *) &addr, &size);
+      ssize_t length = recvfrom(sockfd, data, 1472, 0, (struct sockaddr *) &addr, &size);
       rudp_recv(addr, data, length);
     }
     if(FD_ISSET(sockfd, &writefd)) {
