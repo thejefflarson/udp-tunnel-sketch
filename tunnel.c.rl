@@ -22,7 +22,6 @@ typedef struct {
   uint8_t proto;
   uint16_t ack;
   uint16_t seq;
-  uint16_t connid;
 } __attribute__((packed)) rudp_header_t;
 
 typedef struct {
@@ -70,16 +69,17 @@ typedef struct {
   uint8_t their_key[crypto_box_PUBLICKEYBYTES];
   uint8_t pk[crypto_box_PUBLICKEYBYTES];
   uint8_t sk[crypto_box_SECRETKEYBYTES];
+  uint16_t connid;
   struct sockaddr_storage addr;
   rudp_circular_buffer_t *out;
   rudp_circular_buffer_t *in;
 } rudp_conn_t;
 
 int
-rudp_recv(struct sockaddr_storage addr, uint8_t *data, int length);
+rudp_recv(rudp_conn_t *conn, uint8_t *data, int length);
 
 int
-rudp_send(struct sockaddr_storage addr, uint8_t *data, int length);
+rudp_send(rudp_conn_t *conn, uint8_t *data, int length);
 
 void
 loop(rudp_conn_t *conn){
@@ -99,7 +99,8 @@ loop(rudp_conn_t *conn){
     }
     if(FD_ISSET(sockfd, &writefd)) {
       rudp_packet_t *packet = buffer_get(conn->out, conn->ack + 1);
-      sendto(sockfd, packet->data, packet->length, 0, (struct sockaddr *)&conn->addr, sizeof(conn->addr));
+      if(packet != NULL)
+        sendto(sockfd, packet->data, packet->length, 0, (struct sockaddr *)&conn->addr, sizeof(conn->addr));
     }
   }
 }
@@ -110,28 +111,47 @@ rudp_connect(struct sockaddr_storage addr) {
 }
 
 int
-rudp_send(rudp_conn_t conn, uint8_t *data, int length) {
+rudp_send(rudp_conn_t *conn, uint8_t *data, int length) {
+  rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
+  if(packet == NULL) return -1;
+  packet->header.seq = htonl(++conn->seq);
+  packet->header.ack = htonl(conn->ack);
+  packet->data = data;
+  packet->length = length;
+  buffer_put(conn->out, packet, conn->seq);
   return 0;
 }
 
 int
-rudp_recv(rudp_conn_t conn, uint8_t *data, int length) {
-  switch(flags) {
+rudp_recv(rudp_conn_t *conn, uint8_t *data, int length) {
+
+  switch(data[0]) {
     case HI:
-    case HELLO:
-      if(flags == HELLO) {
+    case HELLO:{
+      rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
+      packet->header.seq = conn->seq++;
+      packet->header.ack = conn->ack;
+      packet->data = data;
+      packet->length = length;
+      if(packet == NULL) return -1;
+      if(data[0] == HELLO) {
+        packet->header.proto = HI;
 
-      } else { // HI
+      } else if(data[0] == HI) { // HI
 
+      } else {
+        free(packet);
+        return -1;
       }
       break;
+    }
     case DATA:{
 
 
       break;
     }
     default:
-      puts("error!");
+      goto err;
       return -1;
   }
   return 0;
