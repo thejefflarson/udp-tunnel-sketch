@@ -130,7 +130,10 @@ _queue(rudp_conn_t *conn, rudp_packet_t *packet) {
 
 int
 rudp_send(rudp_conn_t *conn, uint8_t *data, size_t length) {
-  if(conn->state != CONN || conn->state != KEYS) return -1;
+  if(conn->state != CONN || conn->state != KEYS) {
+    errno = EINVAL;
+    return -1;
+  }
   rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
   if(packet == NULL) return -1;
   packet->data = data;
@@ -148,6 +151,7 @@ rudp_recv(rudp_conn_t *conn, uint8_t *data, size_t length, uint8_t **out, size_t
     case HELLO:{
       rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
       if(packet == NULL) return -1;
+      errno = EINPROGRESS;
 
       if(data[0] == HELLO) {
         conn->state = KEYS;
@@ -157,7 +161,6 @@ rudp_recv(rudp_conn_t *conn, uint8_t *data, size_t length, uint8_t **out, size_t
         memcpy(packet->data, conn->pk, crypto_box_PUBLICKEYBYTES);
         packet->length = crypto_box_PUBLICKEYBYTES;
         _queue(conn, packet);
-        errno = EINPROGRESS;
       } else if(data[0] == HI) {
         if(conn->state != KEYS) {
           errno = EINVAL;
@@ -169,7 +172,6 @@ rudp_recv(rudp_conn_t *conn, uint8_t *data, size_t length, uint8_t **out, size_t
         packet->data = NULL;
         packet->length = 0;
         _queue(conn, packet);
-        return 0;
       } else {
         errno = EINVAL;
         free(packet);
@@ -178,24 +180,22 @@ rudp_recv(rudp_conn_t *conn, uint8_t *data, size_t length, uint8_t **out, size_t
       return -1;
     }
     case DATA:{
-      // update ack and dequeue packets
-
-      if(conn->state != CONN) {
+      // data packet sent too early
+      if(conn->state != CONN || data[0] != DATA) {
         errno = EINVAL;
         return -1;
       }
+      // decrypt packet, update ack, and dequeue acked packets
 
-      if(conn->state == KEYS) {
-        conn->state = CONN;
-        return 0;
-      }
 
+      // empty ack packet, slightly abusing errno here but I'm cool with it
       if(length == sizeof(rudp_header_t)) {
+        if(conn->state == KEYS) conn->state = CONN;
         errno = EAGAIN;
         return -1;
       }
 
-      // parse and decrypt packet
+      // return data
 
       break;
     }
