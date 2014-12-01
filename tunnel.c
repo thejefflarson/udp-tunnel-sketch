@@ -7,7 +7,11 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <time.h>
+#include <errno.h>
 #include "tweetnacl.h"
+
+
+// use this for testing: http://lcamtuf.coredump.cx/afl/README.txt
 
 const uint8_t HELLO = (1 << 0); // syn pubkey
 const uint8_t HI    = (1 << 1); // ack pubkey
@@ -63,7 +67,14 @@ has_space(rudp_circular_buffer_t *buf) {
 }
 #undef BUFFER_SIZE
 
-typedef struct {
+enum state {
+  INIT,
+  KEYS,
+  CONN
+};
+
+typedef struct rudp_conn {
+  enum state state;
   uint16_t seq;
   uint16_t ack;
   uint8_t their_key[crypto_box_PUBLICKEYBYTES];
@@ -91,11 +102,10 @@ loop(rudp_conn_t *conn){
   while(1) {
     select(sockfd + 1, &readfd, &writefd, NULL, NULL);
     if(FD_ISSET(sockfd, &readfd)) {
-      struct sockaddr_storage addr;
       uint8_t data[1472];
       socklen_t size;
-      ssize_t length = recvfrom(sockfd, data, 1472, 0, (struct sockaddr *) &addr, &size);
-      rudp_recv(addr, data, length);
+      ssize_t length = recvfrom(sockfd, data, 1472, 0, (struct sockaddr *) &conn->addr, &size);
+      rudp_recv(conn, data, length);
     }
     if(FD_ISSET(sockfd, &writefd)) {
       rudp_packet_t *packet = buffer_get(conn->out, conn->ack + 1);
@@ -110,49 +120,89 @@ rudp_connect(struct sockaddr_storage addr) {
   return 0;
 }
 
-int
-rudp_send(rudp_conn_t *conn, uint8_t *data, int length) {
-  rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
-  if(packet == NULL) return -1;
+void
+_queue(rudp_conn_t *conn, rudp_packet_t *packet) {
+  packet->proto = DATA;
   packet->header.seq = htonl(++conn->seq);
   packet->header.ack = htonl(conn->ack);
+  buffer_put(conn->out, packet, conn->seq);
+}
+
+int
+rudp_send(rudp_conn_t *conn, uint8_t *data, size_t length) {
+  if(conn->state != CONN || conn->state != KEYS) return -1;
+  rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
+  if(packet == NULL) return -1;
   packet->data = data;
   packet->length = length;
-  buffer_put(conn->out, packet, conn->seq);
+  _queue(conn, packet);
   return 0;
 }
 
 int
-rudp_recv(rudp_conn_t *conn, uint8_t *data, int length) {
-
+rudp_recv(rudp_conn_t *conn, uint8_t *data, size_t length, uint8_t **out, size_t &len) {
+  if(length < sizeof(rudp_header_t)) return -1;
   switch(data[0]) {
+    // both of these cases are EINPROGRESS cases
     case HI:
     case HELLO:{
       rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
-      packet->header.seq = conn->seq++;
-      packet->header.ack = conn->ack;
-      packet->data = data;
-      packet->length = length;
       if(packet == NULL) return -1;
+
       if(data[0] == HELLO) {
+        conn->state = KEYS;
         packet->header.proto = HI;
-
-      } else if(data[0] == HI) { // HI
-
+        packet->data = calloc(crypto_box_PUBLICKEYBYTES, sizeof(uint8_t));
+        if(!packet->data) return -1;
+        memcpy(packet->data, conn->pk, crypto_box_PUBLICKEYBYTES);
+        packet->length = crypto_box_PUBLICKEYBYTES;
+        _queue(conn, packet);
+        errno = EINPROGRESS;
+      } else if(data[0] == HI) {
+        if(conn->state != KEYS) {
+          errno = EINVAL;
+          free(packet);
+          return -1;
+        }
+        conn->state = CONN;
+        packet->header.proto = DATA;
+        packet->data = NULL;
+        packet->length = 0;
+        _queue(conn, packet);
+        return 0;
       } else {
+        errno = EINVAL;
         free(packet);
-        return -1;
       }
-      break;
+
+      return -1;
     }
     case DATA:{
+      // update ack and dequeue packets
 
+      if(conn->state != CONN) {
+        errno = EINVAL;
+        return -1;
+      }
+
+      if(conn->state == KEYS) {
+        conn->state = CONN;
+        return 0;
+      }
+
+      if(length == sizeof(rudp_header_t)) {
+        errno = EAGAIN;
+        return -1;
+      }
+
+      // parse and decrypt packet
 
       break;
     }
-    default:
-      goto err;
+    default: {
+      errno = EINVAL;
       return -1;
+    }
   }
   return 0;
 }
