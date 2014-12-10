@@ -64,7 +64,7 @@ buffer_delete(rudp_circular_buffer_t *buf, size_t index){
 
 bool
 has_space(rudp_circular_buffer_t *buf) {
-  return buf->size <= BUFFER_SIZE;
+  return buf->size < BUFFER_SIZE;
 }
 #undef BUFFER_SIZE
 
@@ -88,10 +88,10 @@ typedef struct rudp_conn {
 } rudp_conn_t;
 
 int
-rudp_recv(rudp_conn_t *conn, const uint8_t *data, int length);
+rudp_recv(rudp_conn_t *conn, const uint8_t *data, size_t length, uint8_t **out, size_t *len);
 
 int
-rudp_send(rudp_conn_t *conn, const uint8_t *data, int length);
+rudp_send(rudp_conn_t *conn, uint8_t *data, size_t length);
 
 void
 loop(rudp_conn_t *conn){
@@ -123,14 +123,14 @@ rudp_connect(struct sockaddr_storage addr) {
 
 void
 _queue(rudp_conn_t *conn, rudp_packet_t *packet) {
-  packet->proto = DATA;
+  packet->header.proto = DATA;
   packet->header.seq = htonl(++conn->seq);
   packet->header.ack = htonl(conn->ack);
   buffer_put(conn->out, packet, conn->seq);
 }
 
 int
-rudp_send(rudp_conn_t *conn, const uint8_t *data, size_t length) {
+rudp_send(rudp_conn_t *conn, uint8_t *data, size_t length) {
   if(conn->state != CONN || conn->state != KEYS) {
     errno = EINVAL;
     return -1;
@@ -143,76 +143,91 @@ rudp_send(rudp_conn_t *conn, const uint8_t *data, size_t length) {
   return 0;
 }
 
-// even though this is simple needs to be a ragel
 int
-rudp_recv(rudp_conn_t *conn, const uint8_t *data, size_t length, uint8_t **out, size_t &len) {
+handle_hi(rudp_conn_t *conn, const uint8_t *data, size_t length) {
+  if(length < sizeof(rudp_header_t) + crypto_box_PUBLICKEYBYTES) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
+  if(packet == NULL) return -1;
+  errno = EINPROGRESS;
+
+  memcpy(conn->their_key, data + sizeof(rudp_header_t), crypto_box_PUBLICKEYBYTES);
+  rudp_header_t *header = (rudp_header_t *)data;
+  conn->ack = ntohl(header->seq);
+
+  if(conn->state != KEYS) {
+    errno = EINVAL;
+    free(packet);
+    return -1;
+  }
+  conn->state = CONN;
+  packet->header.proto = DATA;
+  packet->data = NULL;
+  packet->length = 0;
+  _queue(conn, packet);
+  return -1;
+}
+
+int
+handle_hello(rudp_conn_t *conn, const uint8_t *data, size_t length) {
+  if(length < sizeof(rudp_header_t) + crypto_box_PUBLICKEYBYTES) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
+  if(packet == NULL) return -1;
+  errno = EINPROGRESS;
+
+  memcpy(conn->their_key, data + sizeof(rudp_header_t), crypto_box_PUBLICKEYBYTES);
+  rudp_header_t *header = (rudp_header_t *)data;
+  conn->ack = ntohl(header->seq);
+
+  conn->state = KEYS;
+  packet->header.proto = HI;
+  packet->data = calloc(crypto_box_PUBLICKEYBYTES, sizeof(uint8_t));
+  if(!packet->data) return -1;
+  memcpy(packet->data, conn->pk, crypto_box_PUBLICKEYBYTES);
+  packet->length = crypto_box_PUBLICKEYBYTES;
+  _queue(conn, packet);
+  return -1;
+}
+
+int
+handle_data(rudp_conn_t *conn, const uint8_t *data, size_t length, uint8_t **out, size_t *len) {
+  // data packet sent too early
+  if(conn->state != CONN) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  // decrypt packet, update ack, and dequeue ack packets
+  size_t mlen = length - crypto_box_NONCEBYTES - crypto_box_ZEROBYTES - 1;
+  uint8_t *message = calloc(mlen, sizeof(uint8_t));
+  if(message == NULL) return -1;
+  uint8_t nonce[crypto_box_NONCEBYTES];
+  memcpy(nonce, data + 1, crypto_box_NONCEBYTES);
+
+  // empty ack packet, slightly abusing errno here but I'm cool with it
+  if(length == sizeof(rudp_header_t) + crypto_box_NONCEBYTES) {
+    if(conn->state == KEYS) conn->state = CONN;
+    errno = EAGAIN;
+    return -1;
+  }
+}
+
+int
+rudp_recv(rudp_conn_t *conn, const uint8_t *data, size_t length, uint8_t **out, size_t *len) {
   switch(data[0]) {
-    // both of these cases are EINPROGRESS cases
     case HI:
-    case HELLO:{
-      if(length < sizeof(rudp_header_t) + crypto_box_PUBLICKEYBYTES) {
-        errno = EINVAL;
-        return -1;
-      }
-      if(data[0] != HELLO || data[0] != HI) {
-        errno = EINVAL;
-        return -1;
-      }
-
-      rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
-      if(packet == NULL) return -1;
-      errno = EINPROGRESS;
-      memcpy(conn->their_key, data + sizeof(rudp_header_t), crypto_box_PUBLICKEYBYTES);
-      rudp_header_t *header = data;
-      conn->ack = ntohl(header->seq);
-
-      if(data[0] == HELLO) {
-        conn->state = KEYS;
-        packet->header.proto = HI;
-        packet->data = calloc(crypto_box_PUBLICKEYBYTES, sizeof(uint8_t));
-        if(!packet->data) return -1;
-        memcpy(packet->data, conn->pk, crypto_box_PUBLICKEYBYTES);
-        packet->length = crypto_box_PUBLICKEYBYTES;
-        _queue(conn, packet);
-      } else if(data[0] == HI) {
-        if(conn->state != KEYS) {
-          errno = EINVAL;
-          free(packet);
-          return -1;
-        }
-        conn->state = CONN;
-        packet->header.proto = DATA;
-        packet->data = NULL;
-        packet->length = 0;
-        _queue(conn, packet);
-      }
-
-      return -1;
-    }
-    case DATA:{
-      // data packet sent too early
-      if(conn->state != CONN || data[0] != DATA) {
-        errno = EINVAL;
-        return -1;
-      }
-      // decrypt packet, update ack, and dequeue ack packets
-      size_t mlen = length - crypto_box_NONCEBYTES - crypto_box_ZEROBYTES - 1;
-      uint8_t message = calloc(mlen, sizeof(uint8_t));
-      if(message == NULL) return -1;
-      uint8_t nonce[crypto_box_NONCEBYTES];
-      memcpy(nonce, data + 1, crypto_box_NONCEBYTES);
-
-      // empty ack packet, slightly abusing errno here but I'm cool with it
-      if(length == sizeof(rudp_header_t) + crypto_box_NONCEBYTES) {
-        if(conn->state == KEYS) conn->state = CONN;
-        errno = EAGAIN;
-        return -1;
-      }
-
-      // return data
-
-      break;
-    }
+      return handle_hi(conn, data, length);
+    case HELLO:
+      return handle_hello(conn, data, length);
+    case DATA:
+      return handle_data(conn, data, length, out, len);
     default: {
       errno = EINVAL;
       return -1;
