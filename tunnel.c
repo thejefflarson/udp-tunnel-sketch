@@ -136,7 +136,6 @@ rudp_send(rudp_conn_t *conn, uint8_t *data, size_t length) {
     return -1;
   }
   rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
-  if(packet == NULL) return -1;
   packet->data = data;
   packet->length = length;
   _queue(conn, packet);
@@ -151,7 +150,6 @@ handle_hi(rudp_conn_t *conn, const uint8_t *data, size_t length) {
   }
 
   rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
-  if(packet == NULL) return -1;
   errno = EINPROGRESS;
 
   memcpy(conn->their_key, data + sizeof(rudp_header_t), crypto_box_PUBLICKEYBYTES);
@@ -179,7 +177,6 @@ handle_hello(rudp_conn_t *conn, const uint8_t *data, size_t length) {
   }
 
   rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
-  if(packet == NULL) return -1;
   errno = EINPROGRESS;
 
   memcpy(conn->their_key, data + sizeof(rudp_header_t), crypto_box_PUBLICKEYBYTES);
@@ -207,7 +204,6 @@ handle_data(rudp_conn_t *conn, const uint8_t *data, size_t length, uint8_t **out
   // decrypt packet, update ack, and dequeue ack packets
   size_t mlen = length - crypto_box_NONCEBYTES - crypto_box_ZEROBYTES - 1;
   uint8_t *message = calloc(mlen, sizeof(uint8_t));
-  if(message == NULL) return -1;
   uint8_t nonce[crypto_box_NONCEBYTES];
   memcpy(nonce, data + 1, crypto_box_NONCEBYTES);
 
