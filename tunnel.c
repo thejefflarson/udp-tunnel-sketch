@@ -17,11 +17,9 @@ const uint8_t HELLO = (1 << 0); // syn pubkey
 const uint8_t HI    = (1 << 1); // ack pubkey
 const uint8_t BYE   = (1 << 2); // close
 const uint8_t DATA  = (1 << 3); // encrypted data
-const uint8_t ACK   = (1 << 4);
 
 int sockfd;
-uint16_t seq = 0;
-uint16_t ack = 0;
+
 
 typedef struct {
   uint8_t proto;
@@ -110,8 +108,11 @@ loop(rudp_conn_t *conn){
     }
     if(FD_ISSET(sockfd, &writefd)) {
       rudp_packet_t *packet = buffer_get(conn->out, conn->ack + 1);
+      size_t length;
+      uint8_t data[1472];
+      // encode / encrypt packet
       if(packet != NULL)
-        sendto(sockfd, packet->data, packet->length, 0, (struct sockaddr *)&conn->addr, sizeof(conn->addr));
+        sendto(sockfd, data, length, 0, (struct sockaddr *)&conn->addr, sizeof(conn->addr));
     }
   }
 }
@@ -202,16 +203,29 @@ handle_data(rudp_conn_t *conn, const uint8_t *data, size_t length, uint8_t **out
   }
 
   // decrypt packet, update ack, and dequeue ack packets
-  size_t mlen = length - crypto_box_NONCEBYTES - crypto_box_ZEROBYTES - 1;
-  uint8_t *message = calloc(mlen, sizeof(uint8_t));
+  size_t mlen = length - crypto_box_NONCEBYTES - 1;
+  uint8_t *padded = calloc(mlen, sizeof(uint8_t));
   uint8_t nonce[crypto_box_NONCEBYTES];
   memcpy(nonce, data + 1, crypto_box_NONCEBYTES);
+  crypto_box_open(padded, data + 1 + crypto_box_NONCEBYTES, mlen, nonce, conn->their_key, conn->sk);
+  rudp_header_t *header = (rudp_header_t *)(padded + crypto_box_ZEROBYTES - 1);
+
+  for(; conn->ack < ntohl(header->ack); conn->ack++) {
+    rudp_packet_t *packet = buffer_delete(conn->in, conn->ack);
+    if(packet != NULL) {
+      free(packet->data);
+      free(packet);
+    }
+  }
 
   // empty ack packet, slightly abusing errno here but I'm cool with it
-  if(length == sizeof(rudp_header_t) + crypto_box_NONCEBYTES) {
-    if(conn->state == KEYS) conn->state = CONN;
+  if(plen == 0) {
+    if(conn->state == KEYS)
+      conn->state = CONN;
     errno = EAGAIN;
     return -1;
+  } else {
+    memcpy(out, )
   }
 }
 
