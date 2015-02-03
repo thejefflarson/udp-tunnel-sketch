@@ -18,19 +18,13 @@ const uint8_t HI    = (1 << 1); // ack pubkey
 const uint8_t BYE   = (1 << 2); // close
 const uint8_t DATA  = (1 << 3); // encrypted data
 
-int sockfd;
-
-
+#define PACKET_SIZE 1024 - 5 - crypto_box_NONCEBYTES
 typedef struct {
   uint8_t proto;
   uint16_t ack;
   uint16_t seq;
-} __attribute__((packed)) rudp_header_t;
-
-typedef struct {
-  rudp_header_t header;
-  uint8_t *data;
-  size_t length;
+  uint8_t data[PACKET_SIZE];
+  uint8_t nonce[crypto_box_NONCEBYTES];
 } rudp_packet_t;
 
 // 1k packets per connection -- can buffer ~1.5mb total
@@ -73,6 +67,7 @@ enum state {
 };
 
 typedef struct rudp_conn {
+  int socket;
   enum state state;
   uint16_t seq;
   uint16_t ack;
@@ -82,51 +77,18 @@ typedef struct rudp_conn {
   uint16_t connid;
   struct sockaddr_storage addr;
   rudp_circular_buffer_t *out;
-  rudp_circular_buffer_t *in;
 } rudp_conn_t;
 
-int
-rudp_recv(rudp_conn_t *conn, const uint8_t *data, size_t length, uint8_t **out, size_t *len);
-
-int
-rudp_send(rudp_conn_t *conn, uint8_t *data, size_t length);
-
-void
-loop(rudp_conn_t *conn){
-  fd_set readfd, writefd;
-  FD_ZERO(&readfd);
-  FD_ZERO(&writefd);
-  FD_SET(sockfd, &readfd);
-  FD_SET(sockfd, &writefd);
-  while(1) {
-    select(sockfd + 1, &readfd, &writefd, NULL, NULL);
-    if(FD_ISSET(sockfd, &readfd)) {
-      uint8_t data[1472];
-      socklen_t size;
-      ssize_t length = recvfrom(sockfd, data, 1472, 0, (struct sockaddr *) &conn->addr, &size);
-      rudp_recv(conn, data, length);
-    }
-    if(FD_ISSET(sockfd, &writefd)) {
-      rudp_packet_t *packet = buffer_get(conn->out, conn->ack + 1);
-      size_t length;
-      uint8_t data[1472];
-      // encode / encrypt packet
-      if(packet != NULL)
-        sendto(sockfd, data, length, 0, (struct sockaddr *)&conn->addr, sizeof(conn->addr));
-    }
-  }
-}
 
 int
 rudp_connect(struct sockaddr_storage addr) {
   return 0;
 }
 
-void
+static void
 _queue(rudp_conn_t *conn, rudp_packet_t *packet) {
-  packet->header.proto = DATA;
-  packet->header.seq = htonl(++conn->seq);
-  packet->header.ack = htonl(conn->ack);
+  packet->seq = htonl(++conn->seq);
+  packet->ack = htonl(conn->ack);
   buffer_put(conn->out, packet, conn->seq);
 }
 
@@ -137,65 +99,48 @@ rudp_send(rudp_conn_t *conn, uint8_t *data, size_t length) {
     return -1;
   }
   rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
-  packet->data = data;
-  packet->length = length;
+  size_t len = length < sizeof(packet) ? length : sizeof(packet);
+  memcpy(data, packet->data, len);
   _queue(conn, packet);
+  return len;
+}
+
+static int
+fill_keys(rudp_conn_t *conn, rudp_packet_t *packet) {
+  memcpy(conn->their_key, packet->data, crypto_box_PUBLICKEYBYTES);
+  conn->ack = ntohl(packet->seq);
+  errno = EINPROGRESS;
   return 0;
 }
 
-int
-handle_hi(rudp_conn_t *conn, const uint8_t *data, size_t length) {
-  if(length < sizeof(rudp_header_t) + crypto_box_PUBLICKEYBYTES) {
-    errno = EINVAL;
-    return -1;
-  }
+// needs to have a cookie, and immediately reply
+static int
+handle_hello(rudp_conn_t *conn, rudp_packet_t *packet) {
+  if(fill_keys(conn, packet) == -1) return -1;
+  rudp_packet_t *pckt = calloc(1, sizeof(rudp_packet_t));
+  conn->state = KEYS;
+  pckt->proto = HI;
+  memcpy(packet->data, conn->pk, crypto_box_PUBLICKEYBYTES);
+  _queue(conn, pckt);
+  return -1;
+}
 
-  rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
-  errno = EINPROGRESS;
-
-  memcpy(conn->their_key, data + sizeof(rudp_header_t), crypto_box_PUBLICKEYBYTES);
-  rudp_header_t *header = (rudp_header_t *)data;
-  conn->ack = ntohl(header->seq);
-
+static int
+handle_hi(rudp_conn_t *conn, rudp_packet_t *packet) {
+  if(fill_keys(conn, packet) == -1) return -1;
   if(conn->state != KEYS) {
     errno = EINVAL;
-    free(packet);
     return -1;
   }
+  rudp_packet_t *pckt = calloc(1, sizeof(rudp_packet_t));
   conn->state = CONN;
-  packet->header.proto = DATA;
-  packet->data = NULL;
-  packet->length = 0;
-  _queue(conn, packet);
+  pckt->proto = DATA;
+  _queue(conn, pckt);
   return -1;
 }
 
-int
-handle_hello(rudp_conn_t *conn, const uint8_t *data, size_t length) {
-  if(length < sizeof(rudp_header_t) + crypto_box_PUBLICKEYBYTES) {
-    errno = EINVAL;
-    return -1;
-  }
-
-  rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
-  errno = EINPROGRESS;
-
-  memcpy(conn->their_key, data + sizeof(rudp_header_t), crypto_box_PUBLICKEYBYTES);
-  rudp_header_t *header = (rudp_header_t *)data;
-  conn->ack = ntohl(header->seq);
-
-  conn->state = KEYS;
-  packet->header.proto = HI;
-  packet->data = calloc(crypto_box_PUBLICKEYBYTES, sizeof(uint8_t));
-  if(!packet->data) return -1;
-  memcpy(packet->data, conn->pk, crypto_box_PUBLICKEYBYTES);
-  packet->length = crypto_box_PUBLICKEYBYTES;
-  _queue(conn, packet);
-  return -1;
-}
-
-int
-handle_data(rudp_conn_t *conn, const uint8_t *data, size_t length, uint8_t **out, size_t *len) {
+static int
+handle_data(rudp_conn_t *conn, rudp_packet_t *packet, uint8_t **data) {
   // data packet sent too early
   if(conn->state != CONN) {
     errno = EINVAL;
@@ -203,41 +148,52 @@ handle_data(rudp_conn_t *conn, const uint8_t *data, size_t length, uint8_t **out
   }
 
   // decrypt packet, update ack, and dequeue ack packets
-  size_t mlen = length - crypto_box_NONCEBYTES - 1;
-  uint8_t *padded = calloc(mlen, sizeof(uint8_t));
-  uint8_t nonce[crypto_box_NONCEBYTES];
-  memcpy(nonce, data + 1, crypto_box_NONCEBYTES);
-  crypto_box_open(padded, data + 1 + crypto_box_NONCEBYTES, mlen, nonce, conn->their_key, conn->sk);
-  rudp_header_t *header = (rudp_header_t *)(padded + crypto_box_ZEROBYTES - 1);
-
-  for(; conn->ack < ntohl(header->ack); conn->ack++) {
-    rudp_packet_t *packet = buffer_delete(conn->in, conn->ack);
-    if(packet != NULL) {
-      free(packet->data);
-      free(packet);
-    }
-  }
-
-  // empty ack packet, slightly abusing errno here but I'm cool with it
-  if(plen == 0) {
-    if(conn->state == KEYS)
-      conn->state = CONN;
-    errno = EAGAIN;
+  size_t mlen = PACKET_SIZE - crypto_box_BOXZEROBYTES;
+  uint8_t *c = calloc(mlen + crypto_box_BOXZEROBYTES, sizeof(uint8_t));
+  if(c == NULL) {
+    errno = ENOMEM;
     return -1;
-  } else {
-    memcpy(out, )
   }
+
+  uint8_t *m = calloc(mlen + crypto_box_ZEROBYTES, sizeof(uint8_t));
+  if(m == NULL) {
+    errno = ENOMEM;
+    return -1;
+  }
+
+  uint8_t nonce[crypto_box_NONCEBYTES];
+  memcpy(nonce, packet->nonce, crypto_box_NONCEBYTES);
+  memcpy(c + crypto_box_BOXZEROBYTES, packet->data, mlen);
+  int err = crypto_box_open(c, m, mlen, nonce, conn->their_key, conn->sk);
+  if(err == -1) {
+    errno = EINVAL;
+    return -1;
+  }
+
+  while(conn->ack < ntohl(packet->ack)) {
+    rudp_packet_t *packet = buffer_delete(conn->out, conn->ack);
+    if(packet != NULL) free(packet);
+    conn->ack++;
+  }
+
+  memcpy(data, m + crypto_box_BOXZEROBYTES, mlen);
+  // empty ack packet, slightly abusing errno here but I'm cool with it
+  return 0;
 }
 
 int
-rudp_recv(rudp_conn_t *conn, const uint8_t *data, size_t length, uint8_t **out, size_t *len) {
-  switch(data[0]) {
-    case HI:
-      return handle_hi(conn, data, length);
+rudp_recv(rudp_conn_t *conn, uint8_t **data) {
+  rudp_packet_t packet;
+  socklen_t slen = sizeof(conn->addr);
+  recvfrom(conn->socket, (uint8_t*) &packet, sizeof(packet), 0, (struct sockaddr *)&conn->addr, &slen);
+
+  switch(packet.proto) {
     case HELLO:
-      return handle_hello(conn, data, length);
+      return handle_hello(conn, &packet);
+    case HI:
+      return handle_hi(conn, &packet);
     case DATA:
-      return handle_data(conn, data, length, out, len);
+      return handle_data(conn, &packet, data);
     default: {
       errno = EINVAL;
       return -1;
