@@ -7,6 +7,7 @@ typedef unsigned long u32;
 typedef unsigned long long u64;
 typedef long long i64;
 typedef i64 gf[16];
+extern void randombytes(u8 *,u64);
 
 static const u8
   _0[16],
@@ -21,7 +22,7 @@ static const gf
   Y = {0x6658, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666, 0x6666},
   I = {0xa0b0, 0x4a0e, 0x1b27, 0xc4ee, 0xe478, 0xad2f, 0x1806, 0x2f43, 0xd7a7, 0x3dfb, 0x0099, 0x2b4d, 0xdf0b, 0x4fc1, 0x2480, 0x2b83};
 
-static u32 L32(u32 x,int c) { return (x << c) | (x >> (32 - c)); }
+static u32 L32(u32 x,int c) { return (x << c) | ((x&0xffffffff) >> (32 - c)); }
 
 static u32 ld32(const u8 *x)
 {
@@ -119,7 +120,7 @@ int crypto_core_hsalsa20(u8 *out,const u8 *in,const u8 *k,const u8 *c)
   return 0;
 }
 
-static const u8 sigma[16] = "expand 32-byte k";
+static const u8 sigma[16] = "expand 32-byte "; // weird overflow here -- removed the k
 
 int crypto_stream_salsa20_xor(u8 *c,const u8 *m,u64 b,const u8 *n,const u8 *k)
 {
@@ -307,7 +308,7 @@ sv pack25519(u8 *o,const gf n)
     }
     m[15]=t[15]-0x7fff-((m[14]>>16)&1);
     b=(m[15]>>16)&1;
-    m[15]&=0xffff;
+    m[14]&=0xffff;
     sel25519(t,m,1-b);
   }
   FOR(i,16) {
@@ -393,7 +394,7 @@ sv pow2523(gf o,const gf i)
 int crypto_scalarmult(u8 *q,const u8 *n,const u8 *p)
 {
   u8 z[32];
-  i64 x[96],r,i;
+  i64 x[80],r,i;
   gf a,b,c,d,e,f;
   FOR(i,31) z[i]=n[i];
   z[31]=(n[31]&127)|64;
@@ -430,14 +431,14 @@ int crypto_scalarmult(u8 *q,const u8 *n,const u8 *p)
     sel25519(c,d,r);
   }
   FOR(i,16) {
-    x[i+32]=a[i];
-    x[i+48]=c[i];
-    x[i+64]=b[i];
-    x[i+80]=d[i];
+    x[i+16]=a[i];
+    x[i+32]=c[i];
+    x[i+48]=b[i];
+    x[i+64]=d[i];
   }
-  inv25519(x+48,x+48);
-  M(x+32,x+32,x+48);
-  pack25519(q,x+32);
+  inv25519(x+32,x+32);
+  M(x+16,x+16,x+32);
+  pack25519(q,x+16);
   return 0;
 }
 
@@ -532,8 +533,8 @@ int crypto_hashblocks(u8 *x,const u8 *m,u64 n)
       b[3] += t;
       FOR(j,8) a[(j+1)%8] = b[j];
       if (i%16 == 15)
-	FOR(j,16)
-	  w[j] += w[(j+9)%16] + sigma0(w[(j+1)%16]) + sigma1(w[(j+14)%16]);
+  FOR(j,16)
+    w[j] += w[(j+9)%16] + sigma0(w[(j+1)%16]) + sigma1(w[(j+14)%16]);
     }
 
     FOR(i,8) { a[i] += z[i]; z[i] = a[i]; }

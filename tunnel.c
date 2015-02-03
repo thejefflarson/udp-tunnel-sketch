@@ -10,9 +10,7 @@
 #include <errno.h>
 #include "tweetnacl.h"
 
-
 // use this for testing: http://lcamtuf.coredump.cx/afl/README.txt
-
 const uint8_t HELLO = (1 << 0); // syn pubkey
 const uint8_t HI    = (1 << 1); // ack pubkey
 const uint8_t BYE   = (1 << 2); // close
@@ -98,7 +96,7 @@ rudp_send(rudp_conn_t *conn, uint8_t *data, size_t length) {
     errno = EINVAL;
     return -1;
   }
-  rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
+  rudp_packet_t *packet = (rudp_packet_t *)calloc(1, sizeof(rudp_packet_t));
   size_t len = length < sizeof(packet) ? length : sizeof(packet);
   memcpy(data, packet->data, len);
   _queue(conn, packet);
@@ -117,7 +115,7 @@ fill_keys(rudp_conn_t *conn, rudp_packet_t *packet) {
 static int
 handle_hello(rudp_conn_t *conn, rudp_packet_t *packet) {
   if(fill_keys(conn, packet) == -1) return -1;
-  rudp_packet_t *pckt = calloc(1, sizeof(rudp_packet_t));
+  rudp_packet_t *pckt = (rudp_packet_t *)calloc(1, sizeof(rudp_packet_t));
   conn->state = KEYS;
   pckt->proto = HI;
   memcpy(packet->data, conn->pk, crypto_box_PUBLICKEYBYTES);
@@ -132,7 +130,7 @@ handle_hi(rudp_conn_t *conn, rudp_packet_t *packet) {
     errno = EINVAL;
     return -1;
   }
-  rudp_packet_t *pckt = calloc(1, sizeof(rudp_packet_t));
+  rudp_packet_t *pckt = (rudp_packet_t *)calloc(1, sizeof(rudp_packet_t));
   conn->state = CONN;
   pckt->proto = DATA;
   _queue(conn, pckt);
@@ -149,13 +147,13 @@ handle_data(rudp_conn_t *conn, rudp_packet_t *packet, uint8_t **data) {
 
   // decrypt packet, update ack, and dequeue ack packets
   size_t mlen = PACKET_SIZE - crypto_box_BOXZEROBYTES;
-  uint8_t *c = calloc(mlen + crypto_box_BOXZEROBYTES, sizeof(uint8_t));
+  uint8_t *c = (uint8_t *)calloc(mlen + crypto_box_BOXZEROBYTES, sizeof(uint8_t));
   if(c == NULL) {
     errno = ENOMEM;
     return -1;
   }
 
-  uint8_t *m = calloc(mlen + crypto_box_ZEROBYTES, sizeof(uint8_t));
+  uint8_t *m = (uint8_t *)calloc(mlen + crypto_box_ZEROBYTES, sizeof(uint8_t));
   if(m == NULL) {
     errno = ENOMEM;
     return -1;
