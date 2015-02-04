@@ -9,20 +9,19 @@ const uint8_t RUDP_BYE   = (1 << 2); // close
 const uint8_t RUDP_DATA  = (1 << 3); // encrypted data
 
 #define RUDP_PACKET_SIZE 1024 - 1 - crypto_box_NONCEBYTES
-#define RUDP_DATA_SIZE RUDP_PACKET_SIZE - 4 - crypto_box_ZEROBYTES
-
-typedef struct __attribute__((packed)) {
+typedef struct {
   uint8_t proto;
   uint8_t data[RUDP_PACKET_SIZE];
   uint8_t nonce[crypto_box_NONCEBYTES];
-} rudp_packet_t ;
+} __attribute__((packed)) rudp_packet_t;
 
-typedef struct __attribute__((packed)) {
+#define RUDP_DATA_SIZE RUDP_PACKET_SIZE - 4 - crypto_box_ZEROBYTES
+typedef struct {
   uint8_t padding[crypto_box_ZEROBYTES];
   uint16_t ack;
   uint16_t seq;
   uint8_t data[RUDP_DATA_SIZE];
-} rudp_secret_t;
+} __attribute__((packed)) rudp_secret_t;
 
 enum state {
   RUDP_INIT,
