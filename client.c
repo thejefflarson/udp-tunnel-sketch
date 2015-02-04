@@ -10,3 +10,17 @@ rudp_connect(struct sockaddr_storage addr) {
   	return NULL;
   }
 }
+
+
+static int
+handle_hi(rudp_conn_t *conn, rudp_packet_t *packet) {
+  if(conn->state != RUDP_KEYS) {
+    errno = EINVAL;
+    return -1;
+  }
+  rudp_packet_t *pckt = (rudp_packet_t *)calloc(1, sizeof(rudp_packet_t));
+  conn->state = RUDP_CONN;
+  pckt->proto = RUDP_DATA;
+  buffer_put(&conn->out, packet, conn->seq);
+  return -1;
+}

@@ -11,7 +11,7 @@ const uint8_t RUDP_DATA  = (1 << 3); // encrypted data
 #define RUDP_SECRET_SIZE 1024 - 1 - crypto_box_NONCEBYTES
 typedef struct {
   uint8_t proto;
-  uint8_t data[RUDP_SECRET_SIZE];
+  uint8_t encrypted[RUDP_SECRET_SIZE]; // always encrypted
   uint8_t nonce[crypto_box_NONCEBYTES];
 } __attribute__((packed)) rudp_packet_t;
 
@@ -29,7 +29,14 @@ enum state {
   RUDP_CONN
 };
 
-struct rudp_circular_buffer;
+
+// 1k packets per connection -- can buffer ~1.5mb total
+#define RUDP_BUFFER_SIZE 1024
+typedef struct rudp_circular_buffer {
+  rudp_packet_t *packets[RUDP_BUFFER_SIZE];
+  uint16_t size;
+} rudp_circular_buffer_t;
+
 typedef struct rudp_conn {
   int socket;
   enum state state;
@@ -39,7 +46,8 @@ typedef struct rudp_conn {
   uint8_t pk[crypto_box_PUBLICKEYBYTES];
   uint8_t sk[crypto_box_SECRETKEYBYTES];
   struct sockaddr_storage addr;
-  struct rudp_circular_buffer *out;
+  struct rudp_circular_buffer out;
+  struct rudp_circular_buffer in;
 } rudp_conn_t;
 
 rudp_conn_t *
