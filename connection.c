@@ -31,7 +31,7 @@ rudp_send(rudp_conn_t *conn, uint8_t *data, size_t length) {
   uint8_t m[sizeof(secret)] = {0};
   crypto_box(m, (uint8_t *)&secret, sizeof(secret), packet->nonce, conn->their_key, conn->sk);
   memcpy(packet->data, m + crypto_box_BOXZEROBYTES, sizeof(secret) - crypto_box_BOXZEROBYTES);
-  memset(&secret, 0, sizeof(secret));
+  randombytes((uint8_t *)&secret, sizeof(secret));
   _queue(conn, packet);
   return length;
 }
@@ -39,7 +39,6 @@ rudp_send(rudp_conn_t *conn, uint8_t *data, size_t length) {
 static int
 fill_keys(rudp_conn_t *conn, rudp_packet_t *packet) {
   memcpy(conn->their_key, packet->data, crypto_box_PUBLICKEYBYTES);
-  conn->ack = ntohl(packet->seq);
   errno = EINPROGRESS;
   return 0;
 }
@@ -78,37 +77,33 @@ handle_data(rudp_conn_t *conn, rudp_packet_t *packet, uint8_t **data) {
     return -1;
   }
 
-  // decrypt packet, update ack, and dequeue ack packets
-  size_t mlen = RUDP_PACKET_SIZE - crypto_box_BOXZEROBYTES;
-  uint8_t *c = (uint8_t *)calloc(mlen + crypto_box_BOXZEROBYTES, sizeof(uint8_t));
+  // pad secret
+  uint8_t c[RUDP_SECRET_SIZE + crypto_box_BOXZEROBYTES] = {0};
   if(c == NULL) {
     errno = ENOMEM;
     return -1;
   }
+  memcpy(c + crypto_box_BOXZEROBYTES, packet->data, RUDP_SECRET_SIZE);
 
-  uint8_t *m = (uint8_t *)calloc(mlen + crypto_box_ZEROBYTES, sizeof(uint8_t));
-  if(m == NULL) {
-    errno = ENOMEM;
-    return -1;
-  }
-
-  uint8_t nonce[crypto_box_NONCEBYTES];
-  memcpy(nonce, packet->nonce, crypto_box_NONCEBYTES);
-  memcpy(c + crypto_box_BOXZEROBYTES, packet->data, mlen);
-  int err = crypto_box_open(c, m, mlen, nonce, conn->their_key, conn->sk);
+  // decrypt packet
+  rudp_secret_t secret;
+  memset(&secret, 0, sizeof(secret));
+  int err = crypto_box_open((uint8_t *)&secret, c, RUDP_SECRET_SIZE, packet->nonce, conn->their_key, conn->sk);
   if(err == -1) {
     errno = EINVAL;
     return -1;
   }
 
-  while(conn->ack < ntohl(packet->ack)) {
+  // update ack and dequeue acked packets
+  while(conn->ack < ntohl(secret.ack)) {
     rudp_packet_t *packet = buffer_delete(conn->out, conn->ack);
     if(packet != NULL) free(packet);
     conn->ack++;
   }
 
-  memcpy(data, m + crypto_box_BOXZEROBYTES, mlen);
-  // empty ack packet, slightly abusing errno here but I'm cool with it
+  memcpy(data, secret.data, RUDP_DATA_SIZE);
+  randombytes((uint8_t *)&secret, sizeof(secret));
+
   return 0;
 }
 

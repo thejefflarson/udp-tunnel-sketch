@@ -8,14 +8,14 @@ const uint8_t RUDP_HI    = (1 << 1); // ack pubkey
 const uint8_t RUDP_BYE   = (1 << 2); // close
 const uint8_t RUDP_DATA  = (1 << 3); // encrypted data
 
-#define RUDP_PACKET_SIZE 1024 - 1 - crypto_box_NONCEBYTES
+#define RUDP_SECRET_SIZE 1024 - 1 - crypto_box_NONCEBYTES
 typedef struct {
   uint8_t proto;
-  uint8_t data[RUDP_PACKET_SIZE];
+  uint8_t data[RUDP_SECRET_SIZE];
   uint8_t nonce[crypto_box_NONCEBYTES];
 } __attribute__((packed)) rudp_packet_t;
 
-#define RUDP_DATA_SIZE RUDP_PACKET_SIZE - 4 - crypto_box_ZEROBYTES
+#define RUDP_DATA_SIZE RUDP_SECRET_SIZE - 4 - crypto_box_ZEROBYTES
 typedef struct {
   uint8_t padding[crypto_box_ZEROBYTES];
   uint16_t ack;
