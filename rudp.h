@@ -6,7 +6,7 @@
 // handshake
 const uint8_t RUDP_HELLO = (1 << 0); // client -> server
 const uint8_t RUDP_HI    = (1 << 1); // server -> client
-const uint8_t RUDP_CONN  = (1 << 2); // client -> server
+const uint8_t RUDP_INIT  = (1 << 2); // client -> server
 
 const uint8_t RUDP_BYE   = (1 << 3); // close
 const uint8_t RUDP_DATA  = (1 << 4); // encrypted data
@@ -28,8 +28,8 @@ typedef struct {
   uint8_t data[RUDP_DATA_SIZE];
 } __attribute__((packed)) rudp_secret_t;
 
-enum state {
-  RUDP_INIT,
+enum rudp_state {
+  RUDP_NONE,
   RUDP_KEYS,
   RUDP_CONN
 };
@@ -43,7 +43,7 @@ typedef struct rudp_circular_buffer {
 
 typedef struct {
   int socket;
-  enum state state;
+  enum rudp_state state;
   uint16_t seq;
   uint16_t ack;
   uint8_t their_key[crypto_box_PUBLICKEYBYTES];
@@ -56,13 +56,14 @@ typedef struct {
 
 typedef struct {
   int socket;
-  // for encrypting cookie packets rotates every minute
+  // for encrypting cookie packets rotates every 2 minutes
   uint8_t cpk[crypto_box_PUBLICKEYBYTES];
   uint8_t csk[crypto_box_SECRETKEYBYTES];
 
-  // ephemeral key rotates every 2 minutes
+  // ephemeral key rotates every minute
   uint8_t pk[crypto_box_PUBLICKEYBYTES];
   uint8_t sk[crypto_box_SECRETKEYBYTES];
+  time_t last_update;
 } rudp_node_t;
 
 rudp_conn_t *

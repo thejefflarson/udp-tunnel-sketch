@@ -56,7 +56,9 @@ int
 rudp_recv(rudp_conn_t *conn, uint8_t **data) {
   rudp_packet_t packet;
   socklen_t slen = sizeof(conn->addr);
-  // recv calls should go in rudp_select -- this should just read from the in buffer
+  // check that the pub key in the packet is our pubkey
+
+
   recvfrom(conn->socket, (uint8_t*) &packet, sizeof(packet), 0, (struct sockaddr *)&conn->addr, &slen);
   // data packet sent too early
   if(conn->state != RUDP_CONN || data[0] != RUDP_DATA) {

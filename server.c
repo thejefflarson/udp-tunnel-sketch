@@ -1,3 +1,5 @@
+#include "rudp.h"
+
 // needs to have a cookie, and immediately reply
 static int
 handle_hello(rudp_conn_t *conn, rudp_packet_t *packet) {
