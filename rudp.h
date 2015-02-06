@@ -29,7 +29,6 @@ enum state {
   RUDP_CONN
 };
 
-
 // 1k packets per connection -- can buffer ~1.5mb total
 #define RUDP_BUFFER_SIZE 1024
 typedef struct rudp_circular_buffer {
@@ -45,7 +44,7 @@ typedef struct rudp_conn {
   uint8_t their_key[crypto_box_PUBLICKEYBYTES];
   uint8_t pk[crypto_box_PUBLICKEYBYTES];
   uint8_t sk[crypto_box_SECRETKEYBYTES];
-  struct sockaddr_storage addr;
+  struct sockaddr_storage addr; // can mebbe delete this in place of their key? fft
   struct rudp_circular_buffer out;
   struct rudp_circular_buffer in;
 } rudp_conn_t;
