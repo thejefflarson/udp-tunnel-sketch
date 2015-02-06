@@ -3,16 +3,21 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 
-const uint8_t RUDP_HELLO = (1 << 0); // syn pubkey
-const uint8_t RUDP_HI    = (1 << 1); // ack pubkey
-const uint8_t RUDP_BYE   = (1 << 2); // close
-const uint8_t RUDP_DATA  = (1 << 3); // encrypted data
+// handshake
+const uint8_t RUDP_HELLO = (1 << 0); // client -> server
+const uint8_t RUDP_HI    = (1 << 1); // server -> client
+const uint8_t RUDP_CONN  = (1 << 2); // client -> server
 
-#define RUDP_SECRET_SIZE 1024 - 1 - crypto_box_NONCEBYTES
+const uint8_t RUDP_BYE   = (1 << 3); // close
+const uint8_t RUDP_DATA  = (1 << 4); // encrypted data
+
+#define RUDP_SECRET_SIZE 1472 - 2 - crypto_box_NONCEBYTES - crypto_box_PUBLICKEYBYTES
 typedef struct {
   uint8_t proto;
-  uint8_t encrypted[RUDP_SECRET_SIZE]; // always encrypted
+  uint8_t version;
+  uint8_t pk[crypto_box_PUBLICKEYBYTES];
   uint8_t nonce[crypto_box_NONCEBYTES];
+  uint8_t encrypted[RUDP_SECRET_SIZE]; // always encrypted
 } __attribute__((packed)) rudp_packet_t;
 
 #define RUDP_DATA_SIZE RUDP_SECRET_SIZE - 4 - crypto_box_ZEROBYTES
@@ -36,7 +41,7 @@ typedef struct rudp_circular_buffer {
   uint16_t size;
 } rudp_circular_buffer_t;
 
-typedef struct rudp_conn {
+typedef struct {
   int socket;
   enum state state;
   uint16_t seq;
@@ -44,10 +49,21 @@ typedef struct rudp_conn {
   uint8_t their_key[crypto_box_PUBLICKEYBYTES];
   uint8_t pk[crypto_box_PUBLICKEYBYTES];
   uint8_t sk[crypto_box_SECRETKEYBYTES];
-  struct sockaddr_storage addr; // can mebbe delete this in place of their key? fft
+  struct sockaddr_storage addr;
   struct rudp_circular_buffer out;
   struct rudp_circular_buffer in;
 } rudp_conn_t;
 
+typedef struct {
+  int socket;
+  // for encrypting cookie packets rotates every minute
+  uint8_t cpk[crypto_box_PUBLICKEYBYTES];
+  uint8_t csk[crypto_box_SECRETKEYBYTES];
+
+  // ephemeral key rotates every 2 minutes
+  uint8_t pk[crypto_box_PUBLICKEYBYTES];
+  uint8_t sk[crypto_box_SECRETKEYBYTES];
+} rudp_node_t;
+
 rudp_conn_t *
-rudp_connect(struct sockaddr_storage addr);
+rudp_connect(rudp_node_t *node, struct sockaddr *addr, int port);

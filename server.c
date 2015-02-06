@@ -9,3 +9,8 @@ handle_hello(rudp_conn_t *conn, rudp_packet_t *packet) {
   buffer_put(&conn->out, packet, conn->seq);
   return -1;
 }
+
+rudp_conn_t *
+rudp_accept(rudp_node_t *node) {
+
+}

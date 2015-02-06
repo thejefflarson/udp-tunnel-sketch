@@ -8,6 +8,14 @@
 #include "rudp.h"
 #include "buffer.h"
 
+// make this work on multiple connections
+int
+rudp_do(rudp_conn_t *conn) {
+  fd_set read, write;
+
+  return 0;
+}
+
 // use this for testing: http://lcamtuf.coredump.cx/afl/README.txt
 int
 rudp_send(rudp_conn_t *conn, uint8_t *data, size_t length) {
@@ -51,7 +59,7 @@ rudp_recv(rudp_conn_t *conn, uint8_t **data) {
   // recv calls should go in rudp_select -- this should just read from the in buffer
   recvfrom(conn->socket, (uint8_t*) &packet, sizeof(packet), 0, (struct sockaddr *)&conn->addr, &slen);
   // data packet sent too early
-  if(conn->state != RUDP_CONN) {
+  if(conn->state != RUDP_CONN || data[0] != RUDP_DATA) {
     errno = EINVAL;
     return -1;
   }
@@ -78,6 +86,7 @@ rudp_recv(rudp_conn_t *conn, uint8_t **data) {
     rudp_packet_t *packet = buffer_delete(&conn->out, conn->ack);
     if(packet != NULL) free(packet);
     conn->ack++;
+    // todo: ack back man
   }
 
   memcpy(data, secret.data, RUDP_DATA_SIZE);

@@ -3,7 +3,7 @@
 #include <errno.h>
 
 rudp_conn_t *
-rudp_connect(struct sockaddr_storage addr) {
+rudp_connect(rudp_node_t *node, struct sockaddr *addr, int port) {
   rudp_conn_t *conn = calloc(1, sizeof(rudp_conn_t));
   if(conn == NULL) {
   	errno = EINVAL;
