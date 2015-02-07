@@ -11,7 +11,7 @@ const uint8_t RUDP_INIT  = (1 << 2); // client -> server
 const uint8_t RUDP_BYE   = (1 << 3); // close
 const uint8_t RUDP_DATA  = (1 << 4); // encrypted data
 
-#define RUDP_SECRET_SIZE 1472 - 2 - crypto_box_NONCEBYTES - crypto_box_PUBLICKEYBYTES
+#define RUDP_SECRET_SIZE 1088 - 2 - crypto_box_NONCEBYTES - crypto_box_PUBLICKEYBYTES
 typedef struct {
   uint8_t proto;
   uint8_t version;
@@ -51,7 +51,6 @@ typedef struct {
   uint8_t sk[crypto_box_SECRETKEYBYTES];
   struct sockaddr_storage addr;
   struct rudp_circular_buffer out;
-  struct rudp_circular_buffer in;
 } rudp_conn_t;
 
 typedef struct {
@@ -60,9 +59,6 @@ typedef struct {
   uint8_t cpk[crypto_box_PUBLICKEYBYTES];
   uint8_t csk[crypto_box_SECRETKEYBYTES];
 
-  // ephemeral key rotates every minute
-  uint8_t pk[crypto_box_PUBLICKEYBYTES];
-  uint8_t sk[crypto_box_SECRETKEYBYTES];
   time_t last_update;
 } rudp_node_t;
 

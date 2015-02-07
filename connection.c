@@ -10,8 +10,22 @@
 
 // make this work on multiple connections
 int
-rudp_do(rudp_conn_t *conn) {
+rudp_select(rudp_conn_t *conn) {
   fd_set read, write;
+  rudp_packet_t packet;
+  socklen_t slen = sizeof(conn->addr);
+
+
+
+  // check that the pub key in the packet is for this connection
+  if(recvfrom(conn->socket, (uint8_t*) &packet, sizeof(packet), MSG_PEEK, (struct sockaddr *)&conn->addr, &slen) != -1) {
+    if(memcmp(packet.pk, conn->pk, sizeof(packet.pk)) != 0) {
+      errno = EINVAL;
+      return -1;
+    }
+  } else {
+    return -1;
+  }
 
   return 0;
 }
@@ -36,7 +50,6 @@ rudp_send(rudp_conn_t *conn, uint8_t *data, size_t length) {
   }
   // TODO: handle ETIMEDOUT
 
-
   rudp_packet_t *packet = (rudp_packet_t *)calloc(1, sizeof(rudp_packet_t));
   randombytes(packet->nonce, crypto_box_NONCEBYTES);
   rudp_secret_t secret;
@@ -56,10 +69,8 @@ int
 rudp_recv(rudp_conn_t *conn, uint8_t **data) {
   rudp_packet_t packet;
   socklen_t slen = sizeof(conn->addr);
-  // check that the pub key in the packet is our pubkey
-
-
-  recvfrom(conn->socket, (uint8_t*) &packet, sizeof(packet), 0, (struct sockaddr *)&conn->addr, &slen);
+  int err = recvfrom(conn->socket, (uint8_t*) &packet, sizeof(packet), 0, (struct sockaddr *)&conn->addr, &slen);
+  if(err == -1) return -1;
   // data packet sent too early
   if(conn->state != RUDP_CONN || data[0] != RUDP_DATA) {
     errno = EINVAL;
@@ -77,7 +88,7 @@ rudp_recv(rudp_conn_t *conn, uint8_t **data) {
   // decrypt packet
   rudp_secret_t secret;
   memset(&secret, 0, sizeof(secret));
-  int err = crypto_box_open((uint8_t *)&secret, c, RUDP_SECRET_SIZE, packet.nonce, conn->their_key, conn->sk);
+  err = crypto_box_open((uint8_t *)&secret, c, RUDP_SECRET_SIZE, packet.nonce, conn->their_key, conn->sk);
   if(err == -1) {
     errno = EINVAL;
     return -1;
