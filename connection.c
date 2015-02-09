@@ -19,7 +19,7 @@ rudp_select(rudp_conn_t *conn) {
 
   // check that the pub key in the packet is for this connection
   if(recvfrom(conn->socket, (uint8_t*) &packet, sizeof(packet), MSG_PEEK, (struct sockaddr *)&conn->addr, &slen) != -1) {
-    if(memcmp(packet.pk, conn->pk, sizeof(packet.pk)) != 0) {
+    if(memcmp(packet.pk, conn->pk, sizeof(packet.pk))) {
       errno = EINVAL;
       return -1;
     }
