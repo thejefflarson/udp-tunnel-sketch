@@ -36,6 +36,9 @@ rudp_select(rudp_conn_t *conn) {
       return -1;
     }
 
+    // check for ack
+    // clear out buffer
+
     rudp_packet_t *packet;
     packet = calloc(1, sizeof(packet));
     int err = recvfrom(conn->socket, (uint8_t*) packet, sizeof(packet), 0, (struct sockaddr *)&conn->addr, &slen);
@@ -43,8 +46,14 @@ rudp_select(rudp_conn_t *conn) {
 
     rudp_secret_t secret;
     if(!buffer_has_space(&conn->in) // can't buffer more
-        || open_packet(packet, conn, &secret) == -1 // bad decrypt
-        || ntohl(secret.seq) < conn->rseq) { // repeat packet
+        || open_packet(packet, conn, &secret) == -1) {
+      free(packet);
+      return -1;
+    }
+
+    // todo: send ack packet
+
+    if(secret.ack < conn->rseq) {
       free(packet);
       return -1;
     }
@@ -80,7 +89,7 @@ rudp_send(rudp_conn_t *conn, uint8_t *data, size_t length) {
   randombytes(packet->nonce, crypto_box_NONCEBYTES);
   rudp_secret_t secret;
   memset(&secret, 0, sizeof(secret));
-  secret.ack = ntohl(conn->ack);
+  secret.ack = ntohl(conn->rseq);
   secret.seq = ntohl(++conn->seq);
   memcpy(secret.data, data, length);
   uint8_t m[sizeof(secret)] = {0};
@@ -118,6 +127,5 @@ rudp_recv(rudp_conn_t *conn, uint8_t **data) {
   memcpy(data, secret.data, RUDP_DATA_SIZE);
   randombytes((uint8_t *)&secret, sizeof(secret));
   free(packet);
-  // todo: ack back
   return -1;
 }
