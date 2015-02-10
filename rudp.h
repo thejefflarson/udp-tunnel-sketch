@@ -46,11 +46,13 @@ typedef struct {
   enum rudp_state state;
   uint16_t seq;
   uint16_t ack;
+  uint16_t rseq;
   uint8_t their_key[crypto_box_PUBLICKEYBYTES];
   uint8_t pk[crypto_box_PUBLICKEYBYTES];
   uint8_t sk[crypto_box_SECRETKEYBYTES];
   struct sockaddr_storage addr;
-  struct rudp_circular_buffer out;
+  rudp_circular_buffer out;
+  rudp_circular_buffer in;
 } rudp_conn_t;
 
 typedef struct {

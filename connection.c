@@ -8,6 +8,15 @@
 #include "rudp.h"
 #include "buffer.h"
 
+static int
+open_packet(const rudp_packet_t *packet, const rudp_conn_t *conn, rudp_secret_t *secret){
+  uint8_t c[RUDP_SECRET_SIZE + crypto_box_BOXZEROBYTES] = {0};
+  memcpy(c + crypto_box_BOXZEROBYTES, packet->encrypted, RUDP_SECRET_SIZE);
+  memset(&secret, 0, sizeof(secret));
+  int err = crypto_box_open((uint8_t *)&secret, c, RUDP_SECRET_SIZE, packet->nonce, conn->their_key, conn->sk);
+  if(err == -1) return -1;
+}
+
 // make this work on multiple connections
 int
 rudp_select(rudp_conn_t *conn) {
@@ -15,19 +24,36 @@ rudp_select(rudp_conn_t *conn) {
   rudp_packet_t packet;
   socklen_t slen = sizeof(conn->addr);
 
-
-
   // check that the pub key in the packet is for this connection
   if(recvfrom(conn->socket, (uint8_t*) &packet, sizeof(packet), MSG_PEEK, (struct sockaddr *)&conn->addr, &slen) != -1) {
     if(memcmp(packet.pk, conn->pk, sizeof(packet.pk))) {
       errno = EINVAL;
       return -1;
     }
-  } else {
-    return -1;
+
+    if(conn->state != RUDP_CONN || packet.proto != RUDP_DATA) {
+      errno = EINVAL;
+      return -1;
+    }
+
+    rudp_packet_t *packet;
+    packet = calloc(1, sizeof(packet));
+    int err = recvfrom(conn->socket, (uint8_t*) packet, sizeof(packet), 0, (struct sockaddr *)&conn->addr, &slen);
+    if(err == -1) return -1;
+
+    rudp_secret_t secret;
+    if(!buffer_has_space(&conn->in) // can't buffer more
+        || open_packet(packet, conn, &secret) == -1 // bad decrypt
+        || ntohl(secret.seq) < conn->rseq) { // repeat packet
+      free(packet);
+      return -1;
+    }
+
+    buffer_put(&conn->in, packet, ntohl(secret.seq));
+    randombytes((uint8_t *)&secret, sizeof(secret));
   }
 
-  return 0;
+  return -1;
 }
 
 // use this for testing: http://lcamtuf.coredump.cx/afl/README.txt
@@ -67,42 +93,31 @@ rudp_send(rudp_conn_t *conn, uint8_t *data, size_t length) {
 
 int
 rudp_recv(rudp_conn_t *conn, uint8_t **data) {
-  rudp_packet_t packet;
-  socklen_t slen = sizeof(conn->addr);
-  int err = recvfrom(conn->socket, (uint8_t*) &packet, sizeof(packet), 0, (struct sockaddr *)&conn->addr, &slen);
-  if(err == -1) return -1;
-  // data packet sent too early
-  if(conn->state != RUDP_CONN || data[0] != RUDP_DATA) {
-    errno = EINVAL;
+  rudp_packet_t *packet = buffer_delete(&conn->in, conn->rseq);
+  if(packet == NULL) {
+    errno = EWOULDBLOCK;
     return -1;
   }
 
-  // pad secret
-  uint8_t c[RUDP_SECRET_SIZE + crypto_box_BOXZEROBYTES] = {0};
-  if(c == NULL) {
-    errno = ENOMEM;
-    return -1;
-  }
-  memcpy(c + crypto_box_BOXZEROBYTES, packet.encrypted, RUDP_SECRET_SIZE);
-
-  // decrypt packet
   rudp_secret_t secret;
-  memset(&secret, 0, sizeof(secret));
-  err = crypto_box_open((uint8_t *)&secret, c, RUDP_SECRET_SIZE, packet.nonce, conn->their_key, conn->sk);
-  if(err == -1) {
+  if(open_packet(packet, conn, &secret) == -1) {
+    free(packet);
     errno = EINVAL;
     return -1;
   }
 
-  // update ack and dequeue acked packets
-  while(conn->ack < ntohl(secret.ack)) {
-    rudp_packet_t *packet = buffer_delete(&conn->out, conn->ack);
-    if(packet != NULL) free(packet);
-    conn->ack++;
-    // todo: ack back man
+  // really unlikely scenario
+  if(__builtin_expect(secret.ack != conn->rseq, 0)) {
+    free(packet);
+    errno = EINVAL;
+    return -1;
   }
 
+  conn->ack = ntohl(secret.ack);
+  conn->rseq++;
   memcpy(data, secret.data, RUDP_DATA_SIZE);
   randombytes((uint8_t *)&secret, sizeof(secret));
-  return 0;
+  free(packet);
+  // todo: ack back
+  return -1;
 }
