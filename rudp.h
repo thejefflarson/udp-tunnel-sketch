@@ -11,6 +11,8 @@ const uint8_t RUDP_INIT  = (1 << 2); // client -> server
 const uint8_t RUDP_BYE   = (1 << 3); // close
 const uint8_t RUDP_DATA  = (1 << 4); // encrypted data
 
+const uint8_t RUDP_ACK  = (1 << 5);
+
 #define RUDP_SECRET_SIZE 1088 - 2 - crypto_box_NONCEBYTES - crypto_box_PUBLICKEYBYTES
 typedef struct {
   uint8_t proto;

@@ -36,11 +36,8 @@ rudp_select(rudp_conn_t *conn) {
       return -1;
     }
 
-    // check for ack
-    // clear out buffer
-
     rudp_packet_t *packet;
-    packet = calloc(1, sizeof(packet));
+    packet = (rudp_packet_t *)calloc(1, sizeof(packet));
     int err = recvfrom(conn->socket, (uint8_t*) packet, sizeof(packet), 0, (struct sockaddr *)&conn->addr, &slen);
     if(err == -1) return -1;
 
@@ -51,8 +48,6 @@ rudp_select(rudp_conn_t *conn) {
       return -1;
     }
 
-    // todo: send ack packet
-
     if(secret.ack < conn->rseq) {
       free(packet);
       return -1;
@@ -60,6 +55,10 @@ rudp_select(rudp_conn_t *conn) {
 
     buffer_put(&conn->in, packet, ntohl(secret.seq));
     randombytes((uint8_t *)&secret, sizeof(secret));
+
+    // todo: send ack packet
+    rudp_packet_t ack;
+    rudp_secret_t ack_secret;
   }
 
   return -1;
