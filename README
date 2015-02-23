@@ -1,2 +1,28 @@
 udp-tunnel-sketch
 =================
+
+
+General goals:
+ * posix-like api
+ * strong cryptography, following the ideas of curvecp -- but no protection against mitm attacks, no trusted CAs
+ * resistance to replay attacks
+ * resistance to DDOS attacks, no allocations on server-side connections
+ * unencrypted data is just four bytes for protocol \0r#{version}#{proto}
+ * initial implementation is simply retry on packets, but for the future LEDBAT for congestion control?
+ * fast-enough to handle hundreds of connections
+
+Design:
+ there should be a worker thread that polls an underlying unix socket, and feeds messages into a queue only accessible by that thread, those messages are doled out to the calling thread by calls to accept, select, send, connect, send and recv.
+
+ the worker thread polls the parent fd, and fills in buffers independent of calls to recv, and writes to the socket pair: https://www.gnu.org/software/libc/manual/html_node/Socket-Pairs.html
+
+ sockets should only be accessed from one thread
+
+ inspiration: https://github.com/nanomsg/nanomsg/blob/master/src/core/global.c
+
+ there should be useful global statistics reporting
+
+requirements:
+ nacl or sodium or tweetnacl (included)
+ basic posix
+ pthreads

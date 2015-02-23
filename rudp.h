@@ -1,70 +1,13 @@
-#include <stdint.h>
-#include "tweetnacl.h"
-#include <sys/select.h>
-#include <sys/socket.h>
+#include <stdlib.h>
 
-// handshake
-const uint8_t RUDP_HELLO = (1 << 0); // client -> server
-const uint8_t RUDP_HI    = (1 << 1); // server -> client
-const uint8_t RUDP_INIT  = (1 << 2); // client -> server
-
-const uint8_t RUDP_BYE   = (1 << 3); // close
-const uint8_t RUDP_DATA  = (1 << 4); // encrypted data
-
-const uint8_t RUDP_ACK  = (1 << 5);
-
-#define RUDP_SECRET_SIZE 1088 - 2 - crypto_box_NONCEBYTES - crypto_box_PUBLICKEYBYTES
-typedef struct {
-  uint8_t proto;
-  uint8_t version;
-  uint8_t pk[crypto_box_PUBLICKEYBYTES];
-  uint8_t nonce[crypto_box_NONCEBYTES];
-  uint8_t encrypted[RUDP_SECRET_SIZE]; // always encrypted
-} __attribute__((packed)) rudp_packet_t;
-
-#define RUDP_DATA_SIZE RUDP_SECRET_SIZE - 4 - crypto_box_ZEROBYTES
-typedef struct {
-  uint8_t padding[crypto_box_ZEROBYTES];
-  uint16_t ack;
-  uint16_t seq;
-  uint8_t data[RUDP_DATA_SIZE];
-} __attribute__((packed)) rudp_secret_t;
-
-enum rudp_state {
-  RUDP_NONE,
-  RUDP_KEYS,
-  RUDP_CONN
-};
-
-// 1k packets per connection -- can buffer ~1.5mb total
-#define RUDP_BUFFER_SIZE 1024
-typedef struct rudp_circular_buffer {
-  rudp_packet_t *packets[RUDP_BUFFER_SIZE];
-  uint16_t size;
-} rudp_circular_buffer_t;
-
-typedef struct {
-  int socket;
-  enum rudp_state state;
-  uint16_t seq;
-  uint16_t ack;
-  uint16_t rseq;
-  uint8_t their_key[crypto_box_PUBLICKEYBYTES];
-  uint8_t pk[crypto_box_PUBLICKEYBYTES];
-  uint8_t sk[crypto_box_SECRETKEYBYTES];
-  struct sockaddr_storage addr;
-  rudp_circular_buffer out;
-  rudp_circular_buffer in;
-} rudp_conn_t;
-
-typedef struct {
-  int socket;
-  // for encrypting cookie packets rotates every 2 minutes
-  uint8_t cpk[crypto_box_PUBLICKEYBYTES];
-  uint8_t csk[crypto_box_SECRETKEYBYTES];
-
-  time_t last_update;
-} rudp_node_t;
-
-rudp_conn_t *
-rudp_connect(rudp_node_t *node, struct sockaddr *addr, int port);
+int rudp_socket();
+int rudp_close(int fd);
+int rudp_listen(int fd, int backlog);
+int rudp_connect(int fd, struct sockaddr *addr, int port);
+int rudp_accept(int fd);
+int rudp_send(int fd, const void *data, size_t length, int flags);
+int rudp_recv(int fd, void *data, size_t lengt, int flags);
+int rudp_setsockopt(int fd, const void *data, size_t length);
+int rudp_getsockopt(int fd, const void *data, size_t length);
+// int
+// rudp_select(); <- think about this one
