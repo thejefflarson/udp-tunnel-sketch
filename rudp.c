@@ -73,16 +73,10 @@ buffer_has_space(rudp_circular_buffer_t *buf) {
 }
 #undef RUDP_BUFFER_SIZE
 
-typedef struct {
-  // for encrypting cookie packets rotates every 2 minutes
-  uint8_t cpk[crypto_box_PUBLICKEYBYTES];
-  uint8_t csk[crypto_box_SECRETKEYBYTES];
-  time_t last_update;
-} rudp_listener_fields_t;
+
 
 typedef struct {
-  enum rudp_type; // connected
-  enum rudp_state state; // where to write our messages
+  rudp_state state;
   uint16_t seq;
   uint16_t ack;
   uint16_t rseq;
@@ -91,29 +85,24 @@ typedef struct {
   uint8_t sk[crypto_box_SECRETKEYBYTES];
   struct sockaddr_storage addr;
   struct rudp_circular_buffer out;
-} rudp_connected_fields_t;
+  int socks[2];
+} rudp_conn_t;
 
 typedef struct {
-  // the socket pair
+  int sock;
+  // for encrypting cookie packets rotates every 2 minutes
+  uint8_t cpk[crypto_box_PUBLICKEYBYTES];
+  uint8_t csk[crypto_box_SECRETKEYBYTES];
+  time_t last_update;
+  size_t num_conn;
+  rudp_conn_t **conn;
   int socks[2];
-  enum rudp_type;
-  bool open;
-  pthread_cond_t closed;
-  union {
-    rudp_listener_fields_t  list;
-    rudp_connected_fields_t conn;
-  } impl;
-} rudp_socket_t;
-
-typedef enum {
-  LISTENING,
-  CONNECTED
-} rudp_type;
+} rudp_node_t;
 
 #define RUDP_MAX_SOCKETS FD_SETSIZE
 typedef struct {
   // listening sockets
-  rudp_socket_t **socks;
+  rudp_node_t **nodes;
   uint16_t nsocks;
   uint16_t *unused;
   pthread_t worker;
@@ -127,7 +116,21 @@ pthread_mutex_t glock = PTHREAD_MUTEX_INITIALIZER;
 static void *
 runloop(void *arg){
   while(1) {
-    // doooooo nneeeetwooork
+    int max = 0;
+    fd_set readfds;
+    fd_set writefds;
+
+    int rc = pthread_mutex_lock(&glock);
+    assert(rc == 0);
+    for(int i = 0; i < self.nsocks; i++) {
+      max = self.nodes[i]->sock < i ?: self.nodes[i]->sock;
+      FD_SET(self.nodes[i]->sock, &readfds);
+      FD_SET(self.nodes[i]->sock, &writefds);
+    }
+    rc = pthread_mutex_unlock(&glock);
+    assert(rc == 0);
+
+    // tk
   }
 }
 
@@ -140,8 +143,8 @@ rudp_global_init(){
   if(self.init)
     return;
 
-  self.socks  = calloc(RUDP_MAX_SOCKETS, sizeof(rudp_socket_t *));
-  self.unused = calloc(RUDP_MAX_SOCKETS, sizeof(uint16_t));
+  self.nodes  = (rudp_node_t **) calloc(RUDP_MAX_SOCKETS, sizeof(rudp_node_t *));
+  self.unused = (uint16_t *) calloc(RUDP_MAX_SOCKETS, sizeof(uint16_t));
   for(uint16_t i = 0; i != RUDP_MAX_SOCKETS; ++i)
     self.unused[i] = RUDP_MAX_SOCKETS - i - 1;
 
@@ -153,6 +156,33 @@ rudp_global_init(){
   assert(rc == 0);
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+///////////////////////////////////////////////////////////////////// JUNK DRAWER
 
 int
 rudp_connect(int fd, struct sockaddr *addr, int port) {
@@ -217,11 +247,6 @@ handle_init(rudp_node_t *node, rudp_packet_t *packet) {
   rudp_conn_t *conn = calloc(1, sizeof(rudp_conn_t));
   conn->socket = node->socket;
 
-
-
-  // decrypt cookie packet
-  // fill in connection fields
-  // return a new connection
 }
 
 int
@@ -243,47 +268,7 @@ open_packet(const rudp_packet_t *packet, const rudp_conn_t *conn, rudp_secret_t 
 // make this work on multiple connections
 int
 rudp_select(rudp_conn_t *conn) {
-  fd_set read, write;
-  rudp_packet_t packet;
-  socklen_t slen = sizeof(conn->addr);
 
-  // check that the pub key in the packet is for this connection
-  if(recvfrom(conn->socket, (uint8_t*) &packet, sizeof(packet), MSG_PEEK, (struct sockaddr *)&conn->addr, &slen) != -1) {
-    if(memcmp(packet.pk, conn->pk, sizeof(packet.pk))) {
-      errno = EINVAL;
-      return -1;
-    }
-
-    if(conn->state != RUDP_CONN || packet.proto != RUDP_DATA) {
-      errno = EINVAL;
-      return -1;
-    }
-
-    // check for ack
-    // clear out buffer
-
-    rudp_packet_t *packet;
-    packet = calloc(1, sizeof(packet));
-    int err = recvfrom(conn->socket, (uint8_t*) packet, sizeof(packet), 0, (struct sockaddr *)&conn->addr, &slen);
-    if(err == -1) return -1;
-
-    rudp_secret_t secret;
-    if(!buffer_has_space(&conn->in) // can't buffer more
-        || open_packet(packet, conn, &secret) == -1) {
-      free(packet);
-      return -1;
-    }
-
-    // todo: send ack packet
-
-    if(secret.ack < conn->rseq) {
-      free(packet);
-      return -1;
-    }
-
-    buffer_put(&conn->in, packet, ntohl(secret.seq));
-    randombytes((uint8_t *)&secret, sizeof(secret));
-  }
 
   return -1;
 }
