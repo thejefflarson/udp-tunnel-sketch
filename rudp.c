@@ -73,8 +73,6 @@ buffer_has_space(rudp_circular_buffer_t *buf) {
 }
 #undef RUDP_BUFFER_SIZE
 
-
-
 typedef struct {
   rudp_state state;
   uint16_t seq;
@@ -293,7 +291,7 @@ rudp_send(int fd, uint8_t *data, size_t length) {
   }
   // TODO: handle ETIMEDOUT
 
-  rudp_packet_t *packet = calloc(1, sizeof(rudp_packet_t));
+  rudp_packet_t *packet = (rudp_packet_t *)calloc(1, sizeof(rudp_packet_t));
   randombytes(packet->nonce, crypto_box_NONCEBYTES);
   rudp_secret_t secret;
   memset(&secret, 0, sizeof(secret));
