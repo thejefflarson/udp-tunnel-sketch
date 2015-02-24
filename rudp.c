@@ -8,7 +8,7 @@
 #include <time.h>
 #include <errno.h>
 #include <pthread.h>
-#include <sys/select.h>
+#include <poll.h>
 #include "rudp.h"
 #include "tweetnacl.h"
 
@@ -36,11 +36,13 @@ typedef struct {
   uint8_t data[RUDP_DATA_SIZE];
 } __attribute__((packed)) rudp_secret_t;
 
-enum rudp_state {
-  RUDP_NONE,
-  RUDP_KEYS,
-  RUDP_CONN
-};
+typedef enum {
+  R_NONE = 0,
+  R_LISTENING,
+  R_CONNNECTING,
+  R_CONNECTED,
+  R_TERM
+} rudp_state;
 
 #define RUDP_BUFFER_SIZE 1024
 typedef struct rudp_circular_buffer {
@@ -75,83 +77,85 @@ buffer_has_space(rudp_circular_buffer_t *buf) {
 
 typedef struct {
   rudp_state state;
+  int outfd;     // our bound socket
+  int chanfd[2]; // interthread communication sockets 0 -> user, 1 -> lib
+  pthread_mutex_t sync;
+
+  // connection fields, only filled in for CONNECTED sockets
   uint16_t seq;
   uint16_t ack;
   uint16_t rseq;
   uint8_t their_key[crypto_box_PUBLICKEYBYTES];
   uint8_t pk[crypto_box_PUBLICKEYBYTES];
   uint8_t sk[crypto_box_SECRETKEYBYTES];
-  struct sockaddr_storage addr;
-  struct rudp_circular_buffer out;
-  int socks[2];
-} rudp_conn_t;
-
-typedef struct {
-  int sock;
-  // for encrypting cookie packets rotates every 2 minutes
-  uint8_t cpk[crypto_box_PUBLICKEYBYTES];
-  uint8_t csk[crypto_box_SECRETKEYBYTES];
-  time_t last_update;
-  size_t num_conn;
-  rudp_conn_t **conn;
-  int socks[2];
-} rudp_node_t;
+  rudp_circular_buffer_t out;
+} rudp_socket_t;
 
 #define RUDP_MAX_SOCKETS FD_SETSIZE
 typedef struct {
   // listening sockets
-  rudp_node_t **nodes;
+  rudp_socket_t **socks;
   uint16_t nsocks;
   uint16_t *unused;
   pthread_t worker;
+  // for encrypting cookie packets rotates every 2 minutes
+  uint8_t cpk[crypto_box_PUBLICKEYBYTES];
+  uint8_t csk[crypto_box_SECRETKEYBYTES];
+  time_t last_update;
   int init;
 } rudp_global_t;
 
 rudp_global_t self = {0};
 pthread_mutex_t glock = PTHREAD_MUTEX_INITIALIZER;
 
+// real assert
+#define check(err) if(!(err)) { fprintf(stderr, "assertion \"%s\" failed: file \"%s\", line %d\n", "expression", __FILE__, __LINE__); abort(); }
 
+// the whole shebang really -- this should be broken up and cleaned up
 static void *
 runloop(void *arg){
   while(1) {
-    int max = 0;
-    fd_set readfds;
-    fd_set writefds;
+    int nsocks;
+    struct pollfd *fds;
 
-    int rc = pthread_mutex_lock(&glock);
-    assert(rc == 0);
-    for(int i = 0; i < self.nsocks; i++) {
-      max = self.nodes[i]->sock < i ?: self.nodes[i]->sock;
-      FD_SET(self.nodes[i]->sock, &readfds);
-      FD_SET(self.nodes[i]->sock, &writefds);
+    check(pthread_mutex_lock(&glock) == 0);
+    nsocks = self.nsocks;
+    fds = calloc(nsocks, sizeof(struct pollfd));
+    for(int i = 0; i < nsocks; i++) {
+      fds[i].fd = self.socks[i]->outfd;
+      fds[i].events = POLLIN;
     }
-    rc = pthread_mutex_unlock(&glock);
-    assert(rc == 0);
+    check(pthread_mutex_unlock(&glock) == 0);
 
-    // tk
+    poll(fds, nsocks, 0);
+
+    for(int i = 0; i < nsocks; i++) {
+      if(fds[i].events | POLLIN) {
+        check(pthread_mutex_lock(&self.socks[i]->sync) == 0);
+        if(&self.socks[i]->state == R_NONE) continue; // set errors
+        // read packet
+        // handle packet and put in our communication channel
+        check(pthread_mutex_unlock(&self.socks[i]->sync) == 0);
+      }
+    }
+
+    // terminate closing sockets
   }
 }
 
 
 static void
 rudp_global_init(){
-  int rc = pthread_mutex_lock(&glock);
-  // needs to be a crash only error
-  assert(rc == 0);
-  if(self.init)
+  if(self.socks)
     return;
 
-  self.nodes  = (rudp_node_t **) calloc(RUDP_MAX_SOCKETS, sizeof(rudp_node_t *));
+  self.socks  = (rudp_socket_t **) calloc(RUDP_MAX_SOCKETS, sizeof(rudp_socket_t *));
   self.unused = (uint16_t *) calloc(RUDP_MAX_SOCKETS, sizeof(uint16_t));
   for(uint16_t i = 0; i != RUDP_MAX_SOCKETS; ++i)
     self.unused[i] = RUDP_MAX_SOCKETS - i - 1;
 
   // off to the races
   pthread_create(&self.worker, NULL, &runloop, NULL);
-
-  self.init = 1;
-  rc = pthread_mutex_unlock(&glock);
-  assert(rc == 0);
 }
 
 
