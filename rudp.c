@@ -77,8 +77,8 @@ buffer_has_space(rudp_circular_buffer_t *buf) {
 
 typedef struct {
   rudp_state state;
-  int outfd;     // our bound socket
-  int chanfd[2]; // interthread communication sockets 0 -> user, 1 -> lib
+  int out;     // our bound socket
+  int chan[2]; // interthread communication sockets 0 -> user, 1 -> lib
   pthread_mutex_t sync;
 
   // connection fields, only filled in for CONNECTED sockets
@@ -116,30 +116,39 @@ static void *
 runloop(void *arg){
   while(1) {
     int nsocks;
-    struct pollfd *fds;
-
+    // we lock here to make a copy of our open sockets
     check(pthread_mutex_lock(&glock) == 0);
     nsocks = self.nsocks;
-    fds = calloc(nsocks, sizeof(struct pollfd));
+    struct pollfd fds[nsocks];
+    struct pollfd chans[nsocks];
+
     for(int i = 0; i < nsocks; i++) {
-      fds[i].fd = self.socks[i]->outfd;
-      fds[i].events = POLLIN;
+      fds[i].fd = self.socks[i]->out;
+      fds[i].events = POLLIN | POLLOUT;
+      chans[i].fd = self.socks[i]->chan[1];
+      chans[i].events = POLLIN | POLLOUT;
     }
     check(pthread_mutex_unlock(&glock) == 0);
 
     poll(fds, nsocks, 0);
+    poll(chans, nsocks, 0);
 
     for(int i = 0; i < nsocks; i++) {
-      if(fds[i].events | POLLIN) {
-        check(pthread_mutex_lock(&self.socks[i]->sync) == 0);
-        if(&self.socks[i]->state == R_NONE) continue; // set errors
+      if(self.socks[i]->state == R_NONE) continue; // set errors
+      if(fds[i].revents | POLLIN && chans[i].revents | POLLOUT) {
         // read packet
         // handle packet and put in our communication channel
-        check(pthread_mutex_unlock(&self.socks[i]->sync) == 0);
+      }
+
+      if(fds[i].revents | POLLOUT && chans[i].revents | POLLIN) {
+        // read from communication channel and
+        // write packet
       }
     }
 
     // terminate closing sockets
+
+
   }
 }
 
