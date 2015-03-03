@@ -145,10 +145,6 @@ runloop(void *arg){
         // write packet
       }
     }
-
-    // terminate closing sockets
-
-
   }
 }
 
