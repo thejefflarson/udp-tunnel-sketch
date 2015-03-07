@@ -88,13 +88,13 @@ typedef struct {
   uint8_t their_key[crypto_box_PUBLICKEYBYTES];
   uint8_t pk[crypto_box_PUBLICKEYBYTES];
   uint8_t sk[crypto_box_SECRETKEYBYTES];
-  rudp_circular_buffer_t out;
+  rudp_circular_buffer_t pending;
 } rudp_socket_t;
 
 #define RUDP_MAX_SOCKETS FD_SETSIZE
 typedef struct {
   // listening sockets
-  rudp_socket_t **socks;
+  rudp_socket_t *socks;
   uint16_t nsocks;
   uint16_t *unused;
   pthread_t worker;
@@ -120,27 +120,24 @@ runloop(void *arg){
     check(pthread_mutex_lock(&glock) == 0);
     nsocks = self.nsocks;
     struct pollfd fds[nsocks];
-    struct pollfd chans[nsocks];
-
+    rudp_socket_t socks[nsocks];
     for(int i = 0; i < nsocks; i++) {
-      fds[i].fd = self.socks[i]->out;
+      fds[i].fd = self.socks[i].out;
       fds[i].events = POLLIN | POLLOUT;
-      chans[i].fd = self.socks[i]->chan[1];
-      chans[i].events = POLLIN | POLLOUT;
+      socks[i] = self.socks[i];
     }
     check(pthread_mutex_unlock(&glock) == 0);
 
-    poll(fds, nsocks, 0);
-    poll(chans, nsocks, 0);
+    poll(fds, nsocks, 1000 * 60);
 
     for(int i = 0; i < nsocks; i++) {
-      if(self.socks[i]->state == R_NONE) continue; // set errors
-      if(fds[i].revents | POLLIN && chans[i].revents | POLLOUT) {
+      if(self.socks[i].state == R_NONE) continue; // set errors
+      if(fds[i].revents | POLLIN) {
         // read packet
         // handle packet and put in our communication channel
       }
 
-      if(fds[i].revents | POLLOUT && chans[i].revents | POLLIN) {
+      if(fds[i].revents | POLLOUT) {
         // read from communication channel and
         // write packet
       }
@@ -154,7 +151,7 @@ rudp_global_init(){
   if(self.socks)
     return;
 
-  self.socks  = (rudp_socket_t **) calloc(RUDP_MAX_SOCKETS, sizeof(rudp_socket_t *));
+  self.socks  = (rudp_socket_t *) calloc(RUDP_MAX_SOCKETS, sizeof(rudp_socket_t));
   self.unused = (uint16_t *) calloc(RUDP_MAX_SOCKETS, sizeof(uint16_t));
   for(uint16_t i = 0; i != RUDP_MAX_SOCKETS; ++i)
     self.unused[i] = RUDP_MAX_SOCKETS - i - 1;
