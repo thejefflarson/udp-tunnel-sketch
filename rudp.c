@@ -1,6 +1,5 @@
 #include <arpa/inet.h>
 #include <memory.h>
-#include <memory.h>
 #include <assert.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -9,6 +8,7 @@
 #include <errno.h>
 #include <pthread.h>
 #include <poll.h>
+#include <unistd.h>
 #include "rudp.h"
 #include "tweetnacl.h"
 
@@ -120,31 +120,35 @@ runloop(void *arg){
     check(pthread_mutex_lock(&glock) == 0);
     nsocks = self.nsocks;
     struct pollfd fds[nsocks];
+    struct pollfd chans[nsocks];
+
     rudp_socket_t socks[nsocks];
     for(int i = 0; i < nsocks; i++) {
       fds[i].fd = self.socks[i].out;
       fds[i].events = POLLIN | POLLOUT;
+      chans[i].fd = self.socks[i].chan[1];
+      chans[i].events = POLLIN | POLLOUT;
       socks[i] = self.socks[i];
     }
     check(pthread_mutex_unlock(&glock) == 0);
 
     poll(fds, nsocks, 1000 * 60);
+    poll(chans, nsocks, 1000 * 60);
 
     for(int i = 0; i < nsocks; i++) {
-      if(self.socks[i].state == R_NONE) continue; // set errors
-      if(fds[i].revents | POLLIN) {
-        // read packet
-        if(socks[i].state == R_LISTENING) {
-          listener(socks[i]);
-        } else {
-          reciever(socks[i]);
-        }
-        // handle packet and send to our communication channel
+      char data[RUDP_DATA_SIZE];
+      int length = RUDP_DATA_SIZE;
+      if(self.socks[i].state == R_NONE)
+        continue; // set errors
+
+      if(fds[i].revents | POLLIN && chans[i].revents | POLLOUT) {
+        do_recv(socks[i], &data, &length);
+        send(socks[i].chan[1], data, length, 0);
       }
 
-      if(fds[i].revents | POLLOUT) {
-        // read from communication channel and
-        // write packet
+      if(fds[i].revents | POLLOUT && chans[i].revents | POLLIN) {
+        recv(socks[i].chan[1], &data, &length, 0);
+        do_send(socks[i], data, length);
       }
     }
   }
