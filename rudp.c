@@ -76,9 +76,15 @@ buffer_has_space(rudp_circular_buffer_t *buf) {
 #undef RUDP_BUFFER_SIZE
 
 typedef struct {
+  int fd;
+  uint32_t ref;
+} sock_t;
+
+typedef struct {
   rudp_state state;
-  int out;     // our bound socket
-  int chan[2]; // interthread communication sockets 0 -> user, 1 -> lib
+  sock_t *out;     // our bound socket
+  int read; // interthread communication sockets 0 -> user, 1 -> lib
+  int write;
   pthread_mutex_t sync;
 
   // connection fields, only filled in for CONNECTED sockets
@@ -124,9 +130,9 @@ runloop(void *arg){
 
     rudp_socket_t socks[nsocks];
     for(int i = 0; i < nsocks; i++) {
-      fds[i].fd = self.socks[i].out;
+      fds[i].fd = self.socks[i].out->fd;
       fds[i].events = POLLIN | POLLOUT;
-      chans[i].fd = self.socks[i].chan[1];
+      chans[i].fd = self.socks[i].write;
       chans[i].events = POLLIN | POLLOUT;
       socks[i] = self.socks[i];
     }
@@ -137,17 +143,17 @@ runloop(void *arg){
 
     for(int i = 0; i < nsocks; i++) {
       char data[RUDP_DATA_SIZE];
-      int length = RUDP_DATA_SIZE;
+      size_t length = RUDP_DATA_SIZE;
       if(self.socks[i].state == R_NONE)
         continue; // set errors
 
       if(fds[i].revents | POLLIN && chans[i].revents | POLLOUT) {
         do_recv(socks[i], &data, &length);
-        send(socks[i].chan[1], data, length, 0);
+        send(socks[i].out->fd, data, length, 0);
       }
 
       if(fds[i].revents | POLLOUT && chans[i].revents | POLLIN) {
-        recv(socks[i].chan[1], &data, &length, 0);
+        recv(socks[i].out->fd, &data, length, 0);
         do_send(socks[i], data, length);
       }
     }
