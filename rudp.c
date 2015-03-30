@@ -100,7 +100,7 @@ typedef struct {
 #define RUDP_MAX_SOCKETS FD_SETSIZE
 typedef struct {
   // listening sockets
-  rudp_socket_t *socks;
+  rudp_socket_t **socks;
   uint16_t nsocks;
   uint16_t *unused;
   pthread_t worker;
@@ -117,46 +117,64 @@ pthread_mutex_t glock = PTHREAD_MUTEX_INITIALIZER;
 // real assert
 #define check(err) if(!(err)) { fprintf(stderr, "assertion \"%s\" failed: file \"%s\", line %d\n", "expression", __FILE__, __LINE__); abort(); }
 
+
+static void
+global_lock(){
+  check(pthread_mutex_lock(&glock) == 0);
+}
+
+static void
+global_unlock(){
+  check(pthread_mutex_unlock(&glock) == 0);
+}
+
 // the whole shebang really -- this should be broken up and cleaned up
 static void *
 runloop(void *arg){
   while(1) {
-    int nsocks;
     // we lock here to make a copy of our open sockets
     check(pthread_mutex_lock(&glock) == 0);
-    nsocks = self.nsocks;
+    int nsocks = self.nsocks;
     struct pollfd fds[nsocks];
     struct pollfd chans[nsocks];
 
-    rudp_socket_t socks[nsocks];
     for(int i = 0; i < nsocks; i++) {
-      fds[i].fd = self.socks[i].out->fd;
+      fds[i].fd = self.socks[i]->out->fd;
       fds[i].events = POLLIN | POLLOUT;
-      chans[i].fd = self.socks[i].write;
+      chans[i].fd = self.socks[i]->write;
       chans[i].events = POLLIN | POLLOUT;
-      socks[i] = self.socks[i];
     }
     check(pthread_mutex_unlock(&glock) == 0);
 
     poll(fds, nsocks, 1000 * 60);
     poll(chans, nsocks, 1000 * 60);
 
+    check(pthread_mutex_lock(&glock) == 0);
     for(int i = 0; i < nsocks; i++) {
       char data[RUDP_DATA_SIZE];
       size_t length = RUDP_DATA_SIZE;
-      if(self.socks[i].state == R_NONE)
+
+      // BAD_SOCKET
+      if(self.socks[i]->state == R_NONE)
         continue; // set errors
 
+      // CLOSING SOCKET
+      if(self.socks[i]->state == R_TERM)
+        continue;
+
+
       if(fds[i].revents | POLLIN && chans[i].revents | POLLOUT) {
-        do_recv(socks[i], &data, &length);
-        send(socks[i].out->fd, data, length, 0);
+        do_recv(self.socks[i], &data, &length);
+        send(self.socks[i]->out->fd, data, length, 0);
       }
 
       if(fds[i].revents | POLLOUT && chans[i].revents | POLLIN) {
-        recv(socks[i].out->fd, &data, length, 0);
-        do_send(socks[i], data, length);
+        recv(self.socks[i]->out->fd, &data, length, 0);
+        do_send(self.socks[i], data, length);
       }
     }
+    check(pthread_mutex_unlock(&glock) == 0);
+
   }
 }
 
@@ -166,7 +184,7 @@ rudp_global_init(){
   if(self.socks)
     return;
 
-  self.socks  = (rudp_socket_t *) calloc(RUDP_MAX_SOCKETS, sizeof(rudp_socket_t));
+  self.socks  = (rudp_socket_t **) calloc(RUDP_MAX_SOCKETS, sizeof(rudp_socket_t *));
   self.unused = (uint16_t *) calloc(RUDP_MAX_SOCKETS, sizeof(uint16_t));
   for(uint16_t i = 0; i != RUDP_MAX_SOCKETS; ++i)
     self.unused[i] = RUDP_MAX_SOCKETS - i - 1;
@@ -174,3 +192,29 @@ rudp_global_init(){
   // off to the races
   pthread_create(&self.worker, NULL, &runloop, NULL);
 }
+
+int
+rudp_socket() {
+  if(self.nsocks >= RUDP_MAX_SOCKETS){
+    errno = EMFILE;
+    return -1;
+  }
+
+  global_lock();
+
+  rudp_global_init();
+
+  int fd = self.unused[RUDP_MAX_SOCKETS - self.nsocks - 1];
+  self.socks[fd] = (rudp_socket_t  *) calloc(1, sizeof(rudp_socket_t));
+  self.nsocks++;
+
+  global_unlock();
+
+  return fd;
+}
+
+int
+rudp_close() {
+
+}
+

@@ -10,4 +10,4 @@ int rudp_recv(int fd, void *data, size_t lengt, int flags);
 int rudp_setsockopt(int fd, const void *data, size_t length);
 int rudp_getsockopt(int fd, const void *data, size_t length);
 // int
-// rudp_select(); <- think about this one
+// rudp_poll(); <- think about this one
