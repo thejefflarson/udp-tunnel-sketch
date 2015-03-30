@@ -154,14 +154,13 @@ runloop(void *arg){
       char data[RUDP_DATA_SIZE];
       size_t length = RUDP_DATA_SIZE;
 
+      // CLOSED SOCKET
+      if(self.socks[i] == NULL)
+        continue;
+
       // BAD_SOCKET
       if(self.socks[i]->state == R_NONE)
         continue; // set errors
-
-      // CLOSING SOCKET
-      if(self.socks[i]->state == R_TERM)
-        continue;
-
 
       if(fds[i].revents | POLLIN && chans[i].revents | POLLOUT) {
         do_recv(self.socks[i], &data, &length);
@@ -214,7 +213,26 @@ rudp_socket() {
 }
 
 int
-rudp_close() {
+rudp_close(int fd) {
+  if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){
+    errno = EBADF;
+    return -1;
+  }
 
+  global_lock();
+
+  // TODO: wait until it flushes
+
+  // socket_term(self.socks[fd]);
+
+  free(self.socks[fd]);
+  self.socks[fd] = NULL;
+  self.unused[RUDP_MAX_SOCKETS - self.nsocks] = fd;
+  self.nsocks--;
+
+  global_unlock();
+
+
+  return 0;
 }
 
