@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <sys/socket.h>
 #include <time.h>
 #include <errno.h>
 #include <pthread.h>
@@ -39,7 +40,7 @@ typedef struct {
 typedef enum {
   R_NONE = 0,
   R_LISTENING,
-  R_CONNNECTING,
+  R_CONNECTING,
   R_CONNECTED,
   R_TERM
 } rudp_state;
@@ -76,14 +77,9 @@ buffer_has_space(rudp_circular_buffer_t *buf) {
 #undef RUDP_BUFFER_SIZE
 
 typedef struct {
-  int fd;
-  uint32_t ref;
-} sock_t;
-
-typedef struct {
   rudp_state state;
-  sock_t *out;     // our bound socket
-  int read; // interthread communication sockets 0 -> user, 1 -> lib
+  int out;  // our bound socket
+  int read; // interthread communication socket
   int write;
   pthread_mutex_t sync;
 
@@ -193,20 +189,29 @@ rudp_global_init() {
 }
 
 int
-rudp_socket() {
+rudp_socket(int type) {
   if(self.nsocks >= RUDP_MAX_SOCKETS){
     errno = EMFILE;
     return -1;
   }
 
   global_lock();
-
   rudp_global_init();
+
+  int lfd = socket(type, SOCK_DGRAM, 0);
+  if(lfd < 0) { global_unlock(); return -1; }
+
+  int pair[2];
+  int err = socketpair(AF_UNIX, SOCK_DGRAM, 0, pair);
+  if(err < 0) { global_unlock(); close(lfd);  return -1; }
 
   int fd = self.unused[RUDP_MAX_SOCKETS - self.nsocks - 1];
   self.socks[fd] = (rudp_socket_t  *) calloc(1, sizeof(rudp_socket_t));
   self.nsocks++;
 
+  self.socks[fd]->out   = lfd;
+  self.socks[fd]->read  = pair[0];
+  self.socks[fd]->write = pair[1];
   global_unlock();
 
   return fd;
@@ -220,18 +225,29 @@ rudp_close(int fd) {
   }
 
   global_lock();
-
   // TODO: wait until it flushes
-
   // socket_term(self.socks[fd]);
-
   free(self.socks[fd]);
   self.socks[fd] = NULL;
   self.unused[RUDP_MAX_SOCKETS - self.nsocks] = fd;
   self.nsocks--;
-
   global_unlock();
 
+  return 0;
+}
+
+int
+rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
+  if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){
+    errno = EBADF;
+    return -1;
+  }
+
+  global_lock();
+  rudp_socket_t *s = self.socks[fd];
+  int rc = bind(s->out, address, address_len);
+  if(rc < -1) { global_unlock(); return -1; }
+  global_unlock();
 
   return 0;
 }
