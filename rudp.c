@@ -102,6 +102,7 @@ typedef struct {
   // listening sockets
   rudp_socket_t **socks;
   uint16_t nsocks;
+  // idea stolen from how nanomsg handles it
   uint16_t *unused;
   pthread_t worker;
   // for encrypting cookie packets rotates every 2 minutes
