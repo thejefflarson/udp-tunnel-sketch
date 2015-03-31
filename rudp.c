@@ -134,7 +134,7 @@ static void *
 runloop(void *arg){
   while(1) {
     // we lock here to make a copy of our open sockets
-    check(pthread_mutex_lock(&glock) == 0);
+    global_lock();
     int nsocks = self.nsocks;
     struct pollfd fds[nsocks];
     struct pollfd chans[nsocks];
@@ -145,12 +145,12 @@ runloop(void *arg){
       chans[i].fd = self.socks[i]->write;
       chans[i].events = POLLIN | POLLOUT;
     }
-    check(pthread_mutex_unlock(&glock) == 0);
+    global_lock();
 
     poll(fds, nsocks, 1000 * 60);
     poll(chans, nsocks, 1000 * 60);
 
-    check(pthread_mutex_lock(&glock) == 0);
+    global_lock();
     for(int i = 0; i < nsocks; i++) {
       char data[RUDP_DATA_SIZE];
       size_t length = RUDP_DATA_SIZE;
@@ -173,8 +173,7 @@ runloop(void *arg){
         do_send(self.socks[i], data, length);
       }
     }
-    check(pthread_mutex_unlock(&glock) == 0);
-
+    global_unlock();
   }
 }
 
