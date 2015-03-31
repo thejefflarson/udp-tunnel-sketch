@@ -22,7 +22,7 @@ Design:
 
  there should be useful global statistics reporting
 
- refcount the sockets.
+ dup the sockets.
 
 requirements:
  nacl or sodium or tweetnacl (included)
