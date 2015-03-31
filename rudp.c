@@ -51,18 +51,18 @@ typedef struct rudp_circular_buffer {
 } rudp_circular_buffer_t;
 
 void
-buffer_put(rudp_circular_buffer_t *buf, rudp_packet_t *packet, size_t index){
+buffer_put(rudp_circular_buffer_t *buf, rudp_packet_t *packet, size_t index) {
   buf->packets[index % RUDP_BUFFER_SIZE] = packet;
   buf->size++;
 }
 
 rudp_packet_t *
-buffer_get(rudp_circular_buffer_t *buf, size_t index){
+buffer_get(rudp_circular_buffer_t *buf, size_t index) {
   return buf->packets[index % RUDP_BUFFER_SIZE];
 }
 
 rudp_packet_t *
-buffer_delete(rudp_circular_buffer_t *buf, size_t index){
+buffer_delete(rudp_circular_buffer_t *buf, size_t index) {
   rudp_packet_t *packet = buffer_get(buf, index);
   buf->packets[index % RUDP_BUFFER_SIZE] = NULL;
   buf->size--;
@@ -120,18 +120,18 @@ pthread_mutex_t glock = PTHREAD_MUTEX_INITIALIZER;
 
 
 static void
-global_lock(){
+global_lock() {
   check(pthread_mutex_lock(&glock) == 0);
 }
 
 static void
-global_unlock(){
+global_unlock() {
   check(pthread_mutex_unlock(&glock) == 0);
 }
 
 // the whole shebang really -- this should be broken up and cleaned up
 static void *
-runloop(void *arg){
+runloop(void *arg) {
   while(1) {
     // we lock here to make a copy of our open sockets
     global_lock();
@@ -179,7 +179,7 @@ runloop(void *arg){
 
 
 static void
-rudp_global_init(){
+rudp_global_init() {
   if(self.socks)
     return;
 
