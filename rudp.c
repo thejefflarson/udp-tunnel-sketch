@@ -45,37 +45,6 @@ typedef enum {
   R_TERM
 } rudp_state;
 
-#define RUDP_BUFFER_SIZE 1024
-typedef struct rudp_circular_buffer {
-  rudp_packet_t *packets[RUDP_BUFFER_SIZE];
-  uint16_t size;
-} rudp_circular_buffer_t;
-
-void
-buffer_put(rudp_circular_buffer_t *buf, rudp_packet_t *packet, size_t index) {
-  buf->packets[index % RUDP_BUFFER_SIZE] = packet;
-  buf->size++;
-}
-
-rudp_packet_t *
-buffer_get(rudp_circular_buffer_t *buf, size_t index) {
-  return buf->packets[index % RUDP_BUFFER_SIZE];
-}
-
-rudp_packet_t *
-buffer_delete(rudp_circular_buffer_t *buf, size_t index) {
-  rudp_packet_t *packet = buffer_get(buf, index);
-  buf->packets[index % RUDP_BUFFER_SIZE] = NULL;
-  buf->size--;
-  return packet;
-}
-
-bool
-buffer_has_space(rudp_circular_buffer_t *buf) {
-  return buf->size < RUDP_BUFFER_SIZE;
-}
-#undef RUDP_BUFFER_SIZE
-
 typedef struct {
   rudp_state state;
   int out;  // our bound socket
@@ -90,7 +59,6 @@ typedef struct {
   uint8_t their_key[crypto_box_PUBLICKEYBYTES];
   uint8_t pk[crypto_box_PUBLICKEYBYTES];
   uint8_t sk[crypto_box_SECRETKEYBYTES];
-  rudp_circular_buffer_t pending;
 } rudp_socket_t;
 
 #define RUDP_MAX_SOCKETS FD_SETSIZE
@@ -136,7 +104,7 @@ runloop(void *arg) {
     struct pollfd chans[nsocks];
 
     for(int i = 0; i < nsocks; i++) {
-      fds[i].fd = self.socks[i]->out->fd;
+      fds[i].fd = self.socks[i]->out;
       fds[i].events = POLLIN | POLLOUT;
       chans[i].fd = self.socks[i]->write;
       chans[i].events = POLLIN | POLLOUT;
