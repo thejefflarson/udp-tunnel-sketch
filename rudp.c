@@ -112,7 +112,7 @@ runloop(void *arg) {
     int nsocks = self.nsocks;
     struct pollfd fds[nsocks];
     struct pollfd chans[nsocks];
-    struct rudp_sock_t socks[nsocks];
+    struct rudp_socket_t *socks[nsocks];
     for(int i = 0; i < nsocks; i++) {
       fds[i].fd = self.socks[i]->out;
       fds[i].events = POLLIN | POLLOUT;
