@@ -42,6 +42,7 @@ typedef enum {
   R_LISTENING,
   R_CONNECTING,
   R_CONNECTED,
+  R_CLOSING,
   R_TERM
 } rudp_state;
 
@@ -51,6 +52,7 @@ typedef struct {
   int read; // interthread communication socket
   int write;
   pthread_mutex_t sync;
+  pthread_cond_t close;
 
   // connection fields, only filled in for CONNECTED sockets
   uint16_t seq;
@@ -102,6 +104,11 @@ socket_unlock(rudp_socket_t *s) {
   check(pthread_mutex_unlock(&s->sync) == 0);
 }
 
+static void
+socket_wait(rudp_socket_t *s) {
+  check(pthread_cond_wait(&s->close, &s->sync) == 0);
+}
+
 
 // the whole shebang really -- this should be broken up and cleaned up
 static void *
@@ -129,18 +136,6 @@ runloop(void *arg) {
       char data[RUDP_DATA_SIZE];
       size_t length = RUDP_DATA_SIZE;
 
-      socket_lock(socks[i]);
-      // CLOSED SOCKET
-      if(self.socks[i] == NULL) {
-        socket_unlock(socks[i]);
-        continue;
-      }
-      // BAD_SOCKET
-      if(self.socks[i]->state == R_NONE) {
-        socket_unlock(socks[i]);
-        continue; // set errors
-      }
-
       if(fds[i].revents | POLLIN && chans[i].revents | POLLOUT) {
         do_recv(self.socks[i], &data, &length);
         send(self.socks[i]->out, data, length, 0);
@@ -150,7 +145,6 @@ runloop(void *arg) {
         recv(self.socks[i]->out, &data, length, 0);
         do_send(self.socks[i], data, length);
       }
-      socket_unlock(socks[i]);
     }
   }
 }
@@ -188,10 +182,11 @@ rudp_socket(int type) {
 
   global_lock();
   rudp_global_init();
-  rudp_socket_t  *sock = (rudp_socket_t  *) calloc(1, sizeof(rudp_socket_t));
-  err = pthread_init(sock->sync, NULL);
+  rudp_socket_t *sock = (rudp_socket_t  *) calloc(1, sizeof(rudp_socket_t));
+  err = pthread_mutex_init(&sock->sync, NULL);
   check(err == 0);
-
+  err = pthread_cond_wait(&sock->close, NULL);
+  check(err == 0);
   self.nsocks++;
   self.socks[fd] = sock;
   self.socks[fd]->out = lfd;
@@ -208,12 +203,17 @@ rudp_close(int fd) {
     errno = EBADF;
     return -1;
   }
+  rudp_socket_t *s = self.socks[fd];
+
+  socket_lock(s);
+  s->state = R_CLOSING;
+  while(s->state != R_TERM) {
+    socket_wait(s);
+  }
+  socket_unlock(s);
 
 
   global_lock();
-  // TODO: wait until it flushes
-  // socket_term(self.socks[fd]);
-
   free(self.socks[fd]);
   self.socks[fd] = NULL;
   self.unused[RUDP_MAX_SOCKETS - self.nsocks] = fd;
@@ -237,6 +237,7 @@ rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
   socket_lock(s);
   int rc = bind(s->out, address, address_len);
   if(rc < -1) { s->out = 0; socket_unlock(s); return -1; }
+  s->state = R_LISTENING;
   socket_unlock(s);
 
   return 0;
