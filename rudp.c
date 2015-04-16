@@ -206,12 +206,12 @@ rudp_close(int fd) {
   rudp_socket_t *s = self.socks[fd];
 
   socket_lock(s);
-  s->state = R_CLOSING;
+  if(s->state != R_TERM)
+    s->state = R_CLOSING;
   while(s->state != R_TERM) {
     socket_wait(s);
   }
   socket_unlock(s);
-
 
   global_lock();
   free(self.socks[fd]);
