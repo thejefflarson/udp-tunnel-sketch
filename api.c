@@ -11,7 +11,7 @@ void
 client(){
 
 }
-
+ 
 
 int
 main(int argc, char **argv) {
@@ -31,4 +31,4 @@ main(int argc, char **argv) {
   rudp_conn_close(conn2);
 
   rudp_server_close(server);
-};
+}

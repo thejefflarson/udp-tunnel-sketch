@@ -3,7 +3,7 @@
 #include <sys/socket.h>
 
 
-int rudp_socket();
+int rudp_socket(int type);
 int rudp_close(int fd);
 int rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len);
 int rudp_listen(int fd, int backlog);

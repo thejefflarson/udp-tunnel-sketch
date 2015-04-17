@@ -1,11 +1,6 @@
 #include <arpa/inet.h>
-#include <memory.h>
-#include <assert.h>
-#include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <sys/socket.h>
-#include <time.h>
 #include <errno.h>
 #include <pthread.h>
 #include <poll.h>
@@ -116,7 +111,7 @@ runloop(void *arg) {
   while(1) {
     // we lock here to make a copy of our open sockets
     global_lock();
-    int nsocks = self.nsocks;
+    nfds_t nsocks = self.nsocks;
     struct pollfd fds[nsocks];
     struct pollfd chans[nsocks];
     struct rudp_socket_t *socks[nsocks];
@@ -125,7 +120,7 @@ runloop(void *arg) {
       fds[i].events = POLLIN | POLLOUT;
       chans[i].fd = self.socks[i]->write;
       chans[i].events = POLLIN | POLLOUT;
-      socks[i] = self.socks[i];
+      socks[i] = (struct rudp_socket_t *) self.socks[i];
     }
     global_lock();
 
@@ -158,7 +153,7 @@ rudp_global_init() {
   self.socks  = (rudp_socket_t **) calloc(RUDP_MAX_SOCKETS, sizeof(rudp_socket_t *));
   self.unused = (uint16_t *) calloc(RUDP_MAX_SOCKETS, sizeof(uint16_t));
   for(uint16_t i = 0; i != RUDP_MAX_SOCKETS; ++i)
-    self.unused[i] = RUDP_MAX_SOCKETS - i - 1;
+    self.unused[i] = (uint16_t) (RUDP_MAX_SOCKETS - i - 1);
 
   // off to the races
   pthread_create(&self.worker, NULL, &runloop, NULL);
@@ -216,7 +211,7 @@ rudp_close(int fd) {
   global_lock();
   free(self.socks[fd]);
   self.socks[fd] = NULL;
-  self.unused[RUDP_MAX_SOCKETS - self.nsocks] = fd;
+  self.unused[RUDP_MAX_SOCKETS - self.nsocks] = (uint16_t) fd;
   self.nsocks--;
   global_unlock();
 
