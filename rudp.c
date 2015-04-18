@@ -104,6 +104,12 @@ socket_wait(rudp_socket_t *s) {
   check(pthread_cond_wait(&s->close, &s->sync) == 0);
 }
 
+static void
+socket_signal(rudp_socket_t *s) {
+  check(pthread_cond_signal(&s->sync) == 0);
+}
+
+
 
 // the whole shebang really -- this should be broken up and cleaned up
 static void *
@@ -114,13 +120,14 @@ runloop(void *arg) {
     nfds_t nsocks = self.nsocks;
     struct pollfd fds[nsocks];
     struct pollfd chans[nsocks];
-    struct rudp_socket_t *socks[nsocks];
+    rudp_socket_t *socks[nsocks];
     for(int i = 0; i < nsocks; i++) {
       fds[i].fd = self.socks[i]->out;
       fds[i].events = POLLIN | POLLOUT;
       chans[i].fd = self.socks[i]->write;
       chans[i].events = POLLIN | POLLOUT;
-      socks[i] = (struct rudp_socket_t *) self.socks[i];
+      int fd = self.unused[RUDP_MAX_SOCKETS - i - 1];
+      socks[i] = self.socks[fd];
     }
     global_lock();
 
@@ -131,15 +138,24 @@ runloop(void *arg) {
       char data[RUDP_DATA_SIZE];
       size_t length = RUDP_DATA_SIZE;
 
+      socket_lock(socks[i]);
+      if(socks[i]->state == R_CLOSING) {
+        send_close(socks[i]);
+        socket_signal(socks[i]);
+        socket_unlock(socks[i]);
+        continue;
+      }
+
       if(fds[i].revents | POLLIN && chans[i].revents | POLLOUT) {
-        do_recv(self.socks[i], &data, &length);
-        send(self.socks[i]->out, data, length, 0);
+        do_recv(socks[i], &data, &length);
+        send(socks[i]->out, data, length, 0);
       }
 
       if(fds[i].revents | POLLOUT && chans[i].revents | POLLIN) {
-        recv(self.socks[i]->out, &data, length, 0);
-        do_send(self.socks[i], data, length);
+        recv(socks[i]->out, &data, length, 0);
+        do_send(socks[i], data, length);
       }
+      socket_unlock(socks[i]);
     }
   }
 }
