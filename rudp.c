@@ -106,10 +106,8 @@ socket_wait(rudp_socket_t *s) {
 
 static void
 socket_signal(rudp_socket_t *s) {
-  check(pthread_cond_signal(&s->sync) == 0);
+  check(pthread_cond_signal(&s->close) == 0);
 }
-
-
 
 // the whole shebang really -- this should be broken up and cleaned up
 static void *
@@ -138,6 +136,7 @@ runloop(void *arg) {
       char data[RUDP_DATA_SIZE];
       size_t length = RUDP_DATA_SIZE;
 
+      // todo state machine ize this
       socket_lock(socks[i]);
       if(socks[i]->state == R_CLOSING) {
         send_close(socks[i]);
