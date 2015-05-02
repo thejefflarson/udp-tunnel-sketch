@@ -74,7 +74,7 @@ typedef struct {
 } rudp_global_t;
 
 rudp_global_t self = {0};
-pthread_mutex_t glock = PTHREAD_MUTEX_INITIALIZER;
+pthread_rwlock_t glock = PTHREAD_RWLOCK_INITIALIZER;
 
 // real crash only assert
 #define check(err) if(!(err)) { fprintf(stderr, "assertion \"%s\" failed: file \"%s\", line %d\n", "expression", __FILE__, __LINE__); abort(); }
@@ -82,13 +82,18 @@ pthread_mutex_t glock = PTHREAD_MUTEX_INITIALIZER;
 # TODO: switch to read write locks
 
 static void
-global_lock() {
-  check(pthread_mutex_lock(&glock) == 0);
+global_read_lock() {
+  check(pthread_rwlock_rdlock(&glock) == 0);
 }
 
 static void
 global_unlock() {
-  check(pthread_mutex_unlock(&glock) == 0);
+  check(pthread_rwlock_unlock(&glock) == 0);
+}
+
+static void
+global_write_lock() {
+  check(pthread_rwlock_wrlock(&glock) == 0);
 }
 
 static void
@@ -116,48 +121,46 @@ static void *
 runloop(void *arg) {
   while(1) {
     // we lock here to make a copy of our open sockets
-    global_lock();
-    nfds_t nsocks = self.nsocks;
-    struct pollfd fds[nsocks];
-    struct pollfd chans[nsocks];
-    rudp_socket_t *socks[nsocks];
-    for(int i = 0; i < nsocks; i++) {
+    global_read_lock();
+    struct pollfd fds[self.nsocks];
+    struct pollfd chans[self.nsocks];
+    for(int i = 0; i < self.nsocks; i++) {
       fds[i].fd = self.socks[i]->out;
       fds[i].events = POLLIN | POLLOUT;
       chans[i].fd = self.socks[i]->write;
       chans[i].events = POLLIN | POLLOUT;
       int fd = self.unused[RUDP_MAX_SOCKETS - i - 1];
-      socks[i] = self.socks[fd];
     }
-    global_lock();
 
-    poll(fds, nsocks, 1000 * 60);
-    poll(chans, nsocks, 1000 * 60);
+    poll(fds, self.nsocks, 100);
+    poll(chans, self.nsocks, 100);
 
-    for(int i = 0; i < nsocks; i++) {
+    for(int i = 0; i < self.nsocks; i++) {
       char data[RUDP_DATA_SIZE];
       size_t length = RUDP_DATA_SIZE;
 
       // todo state machine ize this
-      socket_lock(socks[i]);
-      if(socks[i]->state == R_CLOSING) {
-        send_close(socks[i]);
-        socket_signal(socks[i]);
-        socket_unlock(socks[i]);
+      socket_lock(self.socks[i]);
+      if(self.socks[i]->state == R_CLOSING) {
+        send_close(self.socks[i]);
+        socks[i]->state = R_TERM;
+        socket_signal(self.socks[i]);
+        socket_unlock(self.socks[i]);
         continue;
       }
 
       if(fds[i].revents | POLLIN && chans[i].revents | POLLOUT) {
-        do_recv(socks[i], &data, &length);
-        send(socks[i]->out, data, length, 0);
+        do_recv(self.socks[i], &data, &length);
+        send(self.socks[i]->out, data, length, 0);
       }
 
       if(fds[i].revents | POLLOUT && chans[i].revents | POLLIN) {
-        recv(socks[i]->out, &data, length, 0);
-        do_send(socks[i], data, length);
+        recv(self.socks[i]->out, &data, length, 0);
+        do_send(self.socks[i], data, length);
       }
-      socket_unlock(socks[i]);
+      socket_unlock(self.socks[i]);
     }
+    global_unlock();
   }
 }
 
@@ -178,6 +181,7 @@ rudp_global_init() {
 
 int
 rudp_socket(int type) {
+  global_write_lock();
   if(self.nsocks >= RUDP_MAX_SOCKETS){
     errno = EMFILE;
     return -1;
@@ -192,7 +196,6 @@ rudp_socket(int type) {
 
   int fd = self.unused[RUDP_MAX_SOCKETS - self.nsocks - 1];
 
-  global_lock();
   rudp_global_init();
   rudp_socket_t *sock = (rudp_socket_t  *) calloc(1, sizeof(rudp_socket_t));
   err = pthread_mutex_init(&sock->sync, NULL);
@@ -211,6 +214,7 @@ rudp_socket(int type) {
 
 int
 rudp_close(int fd) {
+  global_read_lock();
   if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){
     errno = EBADF;
     return -1;
@@ -224,8 +228,9 @@ rudp_close(int fd) {
     socket_wait(s);
   }
   socket_unlock(s);
+  global_unlock();
 
-  global_lock();
+  global_write_lock();
   free(self.socks[fd]);
   self.socks[fd] = NULL;
   self.unused[RUDP_MAX_SOCKETS - self.nsocks] = (uint16_t) fd;
@@ -237,39 +242,55 @@ rudp_close(int fd) {
 
 int
 rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
-  global_lock();
+  global_read_lock();
   if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){
     errno = EBADF;
     return -1;
   }
   rudp_socket_t *s = self.socks[fd];
-  global_unlock();
 
   socket_lock(s);
   int rc = bind(s->out, address, address_len);
   if(rc < -1) { s->out = 0; socket_unlock(s); return -1; }
   s->state = R_LISTENING;
   socket_unlock(s);
+  global_unlock();
 
   return 0;
 }
 
-int
-rudp_send(int fd, char *data, int length) {
+ssize_t
+rudp_send(int fd, char *data, size_t length) {
+  global_read_lock();
   if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){
     errno = EBADF;
     return -1;
   }
+
   if(length > RUDP_DATA_SIZE) {
     errno = EMSGSIZE;
     return -1;
   }
-  int out = self.socks[fd]->out;
 
-  return send(out, data, length, 0);
+  ssize_t rc = send(self.socks[fd]->out, data, length, 0);
+  global_unlock();
+  return rc;
 }
 
-int
-rudp_recv(int fd, char *data, int length) {
+ssize_t
+rudp_recv(int fd, char *data, size_t length) {
+  global_read_lock();
+  if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){
+    errno = EBADF;
+    return -1;
+  }
 
+  if(length > RUDP_DATA_SIZE) {
+    errno = EMSGSIZE;
+    return -1;
+  }
+
+  ssize_t rc = send(self.socks[fd]->out, data, length, 0);
+  global_unlock();
+  return rc;
 }
