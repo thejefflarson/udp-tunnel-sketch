@@ -79,6 +79,8 @@ pthread_mutex_t glock = PTHREAD_MUTEX_INITIALIZER;
 // real crash only assert
 #define check(err) if(!(err)) { fprintf(stderr, "assertion \"%s\" failed: file \"%s\", line %d\n", "expression", __FILE__, __LINE__); abort(); }
 
+# TODO: switch to read write locks
+
 static void
 global_lock() {
   check(pthread_mutex_lock(&glock) == 0);
@@ -220,12 +222,11 @@ rudp_close(int fd) {
 
 int
 rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
+  global_lock();
   if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){
     errno = EBADF;
     return -1;
   }
-
-  global_lock();
   rudp_socket_t *s = self.socks[fd];
   global_unlock();
 
@@ -238,3 +239,22 @@ rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
   return 0;
 }
 
+int
+rudp_send(int fd, char *data, int length) {
+  if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){
+    errno = EBADF;
+    return -1;
+  }
+  if(length > RUDP_DATA_SIZE) {
+    errno = EMSGSIZE;
+    return -1;
+  }
+  int out = self.socks[fd]->out;
+
+  return send(out, data, length, 0);
+}
+
+int
+rudp_recv(int fd, char *data, int length) {
+
+}
