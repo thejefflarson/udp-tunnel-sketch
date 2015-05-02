@@ -79,8 +79,6 @@ pthread_rwlock_t glock = PTHREAD_RWLOCK_INITIALIZER;
 // real crash only assert
 #define check(err) if(!(err)) { fprintf(stderr, "assertion \"%s\" failed: file \"%s\", line %d\n", "expression", __FILE__, __LINE__); abort(); }
 
-# TODO: switch to read write locks
-
 static void
 global_read_lock() {
   check(pthread_rwlock_rdlock(&glock) == 0);
@@ -143,7 +141,7 @@ runloop(void *arg) {
       socket_lock(self.socks[i]);
       if(self.socks[i]->state == R_CLOSING) {
         send_close(self.socks[i]);
-        socks[i]->state = R_TERM;
+        self.socks[i]->state = R_TERM;
         socket_signal(self.socks[i]);
         socket_unlock(self.socks[i]);
         continue;
@@ -261,7 +259,7 @@ rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
 }
 
 ssize_t
-rudp_send(int fd, char *data, size_t length) {
+rudp_send(int fd, char *data, size_t length, int flags) {
   global_read_lock();
   if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){
     errno = EBADF;
@@ -279,7 +277,7 @@ rudp_send(int fd, char *data, size_t length) {
 }
 
 ssize_t
-rudp_recv(int fd, char *data, size_t length) {
+rudp_recv(int fd, char *data, size_t length, int flags) {
   global_read_lock();
   if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){
     errno = EBADF;
