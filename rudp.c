@@ -167,6 +167,7 @@ runloop(void *arg) {
 
 static void
 rudp_global_init() {
+  // always called with write lock held
   if(self.socks)
     return;
 
