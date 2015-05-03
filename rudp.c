@@ -259,7 +259,7 @@ rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
 }
 
 ssize_t
-rudp_send(int fd, char *data, size_t length, int flags) {
+rudp_send(int fd, const void *data, size_t length, int flags) {
   global_read_lock();
   if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){
     errno = EBADF;
@@ -277,7 +277,7 @@ rudp_send(int fd, char *data, size_t length, int flags) {
 }
 
 ssize_t
-rudp_recv(int fd, char *data, size_t length, int flags) {
+rudp_recv(int fd, void *data, size_t length, int flags) {
   global_read_lock();
   if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){
     errno = EBADF;
