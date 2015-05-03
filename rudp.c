@@ -181,6 +181,8 @@ rudp_global_init() {
 int
 rudp_socket(int type) {
   global_write_lock();
+  rudp_global_init();
+
   if(self.nsocks >= RUDP_MAX_SOCKETS){
     errno = EMFILE;
     return -1;
@@ -195,7 +197,6 @@ rudp_socket(int type) {
 
   int fd = self.unused[RUDP_MAX_SOCKETS - self.nsocks - 1];
 
-  rudp_global_init();
   rudp_socket_t *sock = (rudp_socket_t  *) calloc(1, sizeof(rudp_socket_t));
   err = pthread_mutex_init(&sock->sync, NULL);
   check(err == 0);
