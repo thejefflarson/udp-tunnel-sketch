@@ -230,10 +230,12 @@ rudp_close(int fd) {
   global_unlock();
 
   global_write_lock();
-  free(self.socks[fd]);
-  self.socks[fd] = NULL;
-  self.unused[RUDP_MAX_SOCKETS - self.nsocks] = (uint16_t) fd;
-  self.nsocks--;
+  if(self.socks[fd] != NULL) {
+    free(self.socks[fd]);
+    self.socks[fd] = NULL;
+    self.unused[RUDP_MAX_SOCKETS - self.nsocks] = (uint16_t) fd;
+    self.nsocks--;
+  }
   global_unlock();
 
   return 0;
