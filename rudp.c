@@ -292,7 +292,7 @@ rudp_recv(int fd, void *data, size_t length, int flags) {
     return -1;
   }
 
-  ssize_t rc = send(self.socks[fd]->out, data, length, 0);
+  ssize_t rc = recv(self.socks[fd]->out, data, length, 0);
   global_unlock();
   return rc;
 }
