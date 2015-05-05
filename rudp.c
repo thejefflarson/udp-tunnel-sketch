@@ -127,7 +127,6 @@ runloop(void *arg) {
       fds[i].events = POLLIN | POLLOUT;
       chans[i].fd = self.socks[i]->write;
       chans[i].events = POLLIN | POLLOUT;
-      int fd = self.unused[RUDP_MAX_SOCKETS - i - 1];
     }
 
     poll(fds, self.nsocks, 100);
@@ -248,6 +247,7 @@ int
 rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
   global_read_lock();
   BASIC_CHECKS
+
   rudp_socket_t *s = self.socks[fd];
 
   socket_lock(s);
