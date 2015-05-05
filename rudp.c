@@ -212,13 +212,15 @@ rudp_socket(int type) {
   return fd;
 }
 
+#define BASIC_CHECKS if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){ \
+  errno = EBADF; \
+  return -1; \
+} \
+
 int
 rudp_close(int fd) {
   global_read_lock();
-  if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){
-    errno = EBADF;
-    return -1;
-  }
+  BASIC_CHECKS
   rudp_socket_t *s = self.socks[fd];
 
   socket_lock(s);
@@ -245,10 +247,7 @@ rudp_close(int fd) {
 int
 rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
   global_read_lock();
-  if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){
-    errno = EBADF;
-    return -1;
-  }
+  BASIC_CHECKS
   rudp_socket_t *s = self.socks[fd];
 
   socket_lock(s);
@@ -261,18 +260,16 @@ rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
   return 0;
 }
 
+#define SIZE_CHECK if(length > RUDP_DATA_SIZE) { \
+  errno = EMSGSIZE; \
+  return -1; \
+}
+
 ssize_t
 rudp_send(int fd, const void *data, size_t length, int flags) {
   global_read_lock();
-  if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){
-    errno = EBADF;
-    return -1;
-  }
-
-  if(length > RUDP_DATA_SIZE) {
-    errno = EMSGSIZE;
-    return -1;
-  }
+  BASIC_CHECKS
+  SIZE_CHECK
 
   ssize_t rc = send(self.socks[fd]->out, data, length, 0);
   global_unlock();
@@ -282,17 +279,13 @@ rudp_send(int fd, const void *data, size_t length, int flags) {
 ssize_t
 rudp_recv(int fd, void *data, size_t length, int flags) {
   global_read_lock();
-  if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){
-    errno = EBADF;
-    return -1;
-  }
-
-  if(length > RUDP_DATA_SIZE) {
-    errno = EMSGSIZE;
-    return -1;
-  }
+  BASIC_CHECKS
+  SIZE_CHECK
 
   ssize_t rc = recv(self.socks[fd]->out, data, length, 0);
   global_unlock();
   return rc;
 }
+
+#undef BASIC_CHECKS
+#undef SIZE_CHECK
