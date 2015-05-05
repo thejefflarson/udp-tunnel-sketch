@@ -43,9 +43,9 @@ typedef enum {
 
 typedef struct {
   rudp_state state;
-  int out;  // our bound socket
-  int read; // interthread communication socket
-  int write;
+  int world;  // our bound socket
+  int user;   // interthread communication socket
+  int internal;
   pthread_mutex_t sync;
   pthread_cond_t close;
 
@@ -123,9 +123,9 @@ runloop(void *arg) {
     struct pollfd fds[self.nsocks];
     struct pollfd chans[self.nsocks];
     for(int i = 0; i < self.nsocks; i++) {
-      fds[i].fd = self.socks[i]->out;
+      fds[i].fd = self.socks[i]->world;
       fds[i].events = POLLIN | POLLOUT;
-      chans[i].fd = self.socks[i]->write;
+      chans[i].fd = self.socks[i]->internal;
       chans[i].events = POLLIN | POLLOUT;
     }
 
@@ -148,11 +148,11 @@ runloop(void *arg) {
 
       if(fds[i].revents | POLLIN && chans[i].revents | POLLOUT) {
         do_recv(self.socks[i], &data, &length);
-        send(self.socks[i]->out, data, length, 0);
+        send(self.socks[i]->world, data, length, 0);
       }
 
       if(fds[i].revents | POLLOUT && chans[i].revents | POLLIN) {
-        recv(self.socks[i]->out, &data, length, 0);
+        recv(self.socks[i]->world, &data, length, 0);
         do_send(self.socks[i], data, length);
       }
       socket_unlock(self.socks[i]);
@@ -203,9 +203,9 @@ rudp_socket(int type) {
   check(err == 0);
   self.nsocks++;
   self.socks[fd] = sock;
-  self.socks[fd]->out = lfd;
-  self.socks[fd]->read = pair[0];
-  self.socks[fd]->write = pair[1];
+  self.socks[fd]->world = lfd;
+  self.socks[fd]->user = pair[0];
+  self.socks[fd]->internal = pair[1];
   global_unlock();
 
   return fd;
@@ -251,8 +251,8 @@ rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
   rudp_socket_t *s = self.socks[fd];
 
   socket_lock(s);
-  int rc = bind(s->out, address, address_len);
-  if(rc < -1) { s->out = 0; socket_unlock(s); return -1; }
+  int rc = bind(s->world, address, address_len);
+  if(rc < -1) { s->world = 0; socket_unlock(s); return -1; }
   s->state = R_LISTENING;
   socket_unlock(s);
   global_unlock();
@@ -271,7 +271,7 @@ rudp_send(int fd, const void *data, size_t length, int flags) {
   BASIC_CHECKS
   SIZE_CHECK
 
-  ssize_t rc = send(self.socks[fd]->out, data, length, 0);
+  ssize_t rc = send(self.socks[fd]->user, data, length, 0);
   global_unlock();
   return rc;
 }
@@ -282,7 +282,7 @@ rudp_recv(int fd, void *data, size_t length, int flags) {
   BASIC_CHECKS
   SIZE_CHECK
 
-  ssize_t rc = recv(self.socks[fd]->out, data, length, 0);
+  ssize_t rc = recv(self.socks[fd]->user, data, length, 0);
   global_unlock();
   return rc;
 }
