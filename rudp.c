@@ -214,7 +214,7 @@ rudp_socket(int type) {
 #define BASIC_CHECKS if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){ \
   errno = EBADF; \
   return -1; \
-} \
+}
 
 int
 rudp_close(int fd) {
