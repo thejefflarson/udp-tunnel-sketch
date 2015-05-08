@@ -43,9 +43,9 @@ typedef enum {
 
 typedef struct {
   rudp_state state;
-  int world;  // our bound socket
-  int user;   // interthread communication socket
-  int internal;
+  int world;    // our bound socket
+  int user;     // interthread communication socket
+  int internal; // pipe from world to user
   pthread_mutex_t sync;
   pthread_cond_t close;
 
@@ -233,6 +233,9 @@ rudp_close(int fd) {
 
   global_write_lock();
   if(self.socks[fd] != NULL) {
+    close(self.socks[fd]->world);
+    close(self.socks[fd]->user);
+    close(self.socks[fd]->internal);
     free(self.socks[fd]);
     self.socks[fd] = NULL;
     self.unused[RUDP_MAX_SOCKETS - self.nsocks] = (uint16_t) fd;
