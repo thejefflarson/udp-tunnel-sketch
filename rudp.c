@@ -137,9 +137,7 @@ runloop(void *arg) {
       char data[RUDP_DATA_SIZE];
       size_t length = RUDP_DATA_SIZE;
 
-      // todo state machine ize this
       socket_lock(self.socks[i]);
-
       switch(self.socks[i]->state) {
         case R_CLOSING: 
           send_close(self.socks[i]);
@@ -164,7 +162,6 @@ runloop(void *arg) {
           // not connected yet
           break;
       }
-
       socket_unlock(self.socks[i]);
     }
     global_unlock();
