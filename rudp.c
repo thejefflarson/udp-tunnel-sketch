@@ -1,10 +1,11 @@
 #include <arpa/inet.h>
 #include <errno.h>
-#include <pthread.h>
 #include <poll.h>
-#include <stdlib.h>
+#include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
+
 #include "rudp.h"
 #include "tweetnacl.h"
 
@@ -138,23 +139,32 @@ runloop(void *arg) {
 
       // todo state machine ize this
       socket_lock(self.socks[i]);
-      if(self.socks[i]->state == R_CLOSING) {
-        send_close(self.socks[i]);
-        self.socks[i]->state = R_TERM;
-        socket_signal(self.socks[i]);
-        socket_unlock(self.socks[i]);
-        continue;
+
+      switch(self.socks[i]->state) {
+        case R_CLOSING: 
+          send_close(self.socks[i]);
+          self.socks[i]->state = R_TERM;
+          socket_signal(self.socks[i]);
+          socket_unlock(self.socks[i]);
+          break;
+        case R_CONNECTING:
+          // check for resend and resend if necessary
+          break;
+        case R_LISTENING:
+        case R_CONNECTED:
+          if(fds[i].revents | POLLIN && chans[i].revents | POLLOUT)
+            do_recv(self.socks[i]);
+
+          if(fds[i].revents | POLLOUT && chans[i].revents | POLLIN)
+            do_send(self.socks[i]);
+          break;
+        case R_TERM:
+          // not deleted yet, fall through
+        case R_NONE:
+          // not connected yet
+          break;
       }
 
-      if(fds[i].revents | POLLIN && chans[i].revents | POLLOUT) {
-        do_recv(self.socks[i], &data, &length);
-        send(self.socks[i]->world, data, length, 0);
-      }
-
-      if(fds[i].revents | POLLOUT && chans[i].revents | POLLIN) {
-        recv(self.socks[i]->world, &data, length, 0);
-        do_send(self.socks[i], data, length);
-      }
       socket_unlock(self.socks[i]);
     }
     global_unlock();
