@@ -1,9 +1,9 @@
 #include <arpa/inet.h>
-#include <stdlib.h>
-#include <stdio.h>
 #include <errno.h>
 #include <pthread.h>
 #include <poll.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <unistd.h>
 #include "rudp.h"
 #include "tweetnacl.h"
