@@ -134,9 +134,6 @@ runloop(void *arg) {
     poll(chans, self.nsocks, 100);
 
     for(int i = 0; i < self.nsocks; i++) {
-      char data[RUDP_DATA_SIZE];
-      size_t length = RUDP_DATA_SIZE;
-
       socket_lock(self.socks[i]);
       switch(self.socks[i]->state) {
         case R_CLOSING: 
