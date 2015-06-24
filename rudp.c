@@ -54,6 +54,7 @@ typedef struct {
   uint16_t seq;
   uint16_t ack;
   uint16_t rseq;
+  time_t last_heard;
   uint8_t their_key[crypto_box_PUBLICKEYBYTES];
   uint8_t pk[crypto_box_PUBLICKEYBYTES];
   uint8_t sk[crypto_box_SECRETKEYBYTES];
@@ -147,7 +148,11 @@ runloop(void *arg) {
           socket_unlock(self.socks[i]);
           break;
         case R_CONNECTING:
-          // check for resend and resend if necessary
+          if(fds[i].revents | POLLIN) {
+
+          } else {
+
+          }
           break;
         case R_LISTENING:
         case R_CONNECTED:
