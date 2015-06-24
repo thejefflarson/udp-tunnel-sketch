@@ -121,6 +121,10 @@ runloop(void *arg) {
   while(1) {
     // we lock here to make a copy of our open sockets
     global_read_lock();
+    if(self.nsocks == 0) {
+      global_unlock();
+      return NULL;
+    }
     struct pollfd fds[self.nsocks];
     struct pollfd chans[self.nsocks];
     for(int i = 0; i < self.nsocks; i++) {
@@ -136,7 +140,7 @@ runloop(void *arg) {
     for(int i = 0; i < self.nsocks; i++) {
       socket_lock(self.socks[i]);
       switch(self.socks[i]->state) {
-        case R_CLOSING: 
+        case R_CLOSING:
           send_close(self.socks[i]);
           self.socks[i]->state = R_TERM;
           socket_signal(self.socks[i]);
@@ -169,7 +173,7 @@ runloop(void *arg) {
 static void
 rudp_global_init() {
   // always called with write lock held
-  if(self.socks)
+  if(self.socks != NULL)
     return;
 
   self.socks  = (rudp_socket_t **) calloc(RUDP_MAX_SOCKETS, sizeof(rudp_socket_t *));
@@ -244,6 +248,10 @@ rudp_close(int fd) {
     self.socks[fd] = NULL;
     self.unused[RUDP_MAX_SOCKETS - self.nsocks] = (uint16_t) fd;
     self.nsocks--;
+    if(self.nsocks == 0) {
+      free(self.socks);
+      self.socks = NULL;
+    }
   }
   global_unlock();
 
