@@ -161,15 +161,11 @@ runloop(void *arg) {
           break;
         case R_CONNECTING:
           do_connect(fds[i].revents, self.socks[i]);
-
           break;
         case R_LISTENING:
         case R_CONNECTED:
-          if(fds[i].revents | POLLIN && chans[i].revents | POLLOUT)
-            do_recv(self.socks[i]);
-
-          if(fds[i].revents | POLLOUT && chans[i].revents | POLLIN)
-            do_send(self.socks[i]);
+          do_recv(fds[i].revents, chans[i].revents, self.socks[i]);
+          do_send(fds[i].revents, chans[i].revents, self.socks[i]);
           break;
         case R_TERM:
           // not deleted yet, fall through
