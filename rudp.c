@@ -20,7 +20,6 @@ const uint8_t RUDP_DATA  = (1 << 4); // encrypted data
 typedef struct {
   uint8_t proto;
   uint8_t version;
-  uint8_t pk[crypto_box_PUBLICKEYBYTES];
   uint8_t nonce[crypto_box_NONCEBYTES];
   uint8_t encrypted[RUDP_SECRET_SIZE]; // always encrypted
 } __attribute__((packed)) rudp_packet_t;
@@ -149,7 +148,7 @@ runloop(void *arg) {
           break;
         case R_CONNECTING:
           if(fds[i].revents | POLLIN) {
-
+            char
           } else {
 
           }

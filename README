@@ -17,13 +17,11 @@ Design:
 
  the worker thread polls the parent fd, and fills in buffers independent of calls to recv, and writes to the socket pair: https://www.gnu.org/software/libc/manual/html_node/Socket-Pairs.html
 
- sockets should only be accessed from one thread
+ sockets should only be changed from the main thread
 
  inspiration: https://github.com/nanomsg/nanomsg/blob/master/src/core/global.c
 
  there should be useful global statistics reporting
-
- dup the sockets.
 
 requirements:
  nacl or sodium or tweetnacl (included)
@@ -42,25 +40,32 @@ Protocol:
                                   byte version
                                   32 bytes short term public key
                                   a cookie made up of
-                                  Secret Key encrypted with server
+                                  short term Secret Key encrypted with server
                                   minute key and then client's public key
                                   random padding
  -----------------------------------------
  INIT
  byte version
+ 32 bytes short term public key
  cookie
+ nonce
  message encrypted to short term public key
  -----------------------------------------
                                   DATA
                                   byte version
+                                  32 bytes short term public key
+                                  nonce
                                   message
  -----------------------------------------
  DATA
  byte version
+ 32 bytes short term public key
+ nonce
  message
 
 
-message format always 1088 - overhead - crypto_box_NONCEBYTES - crypto_box_PUBLICKEYBYTES
+message format encrypted
+ crypto_box_BOXZEROBYTES
  uint32_t seq
  uint32_t ack
  time_t timestamp
