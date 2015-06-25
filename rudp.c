@@ -38,7 +38,8 @@ typedef enum {
   R_CONNECTING,
   R_CONNECTED,
   R_CLOSING,
-  R_TERM
+  R_TERM,
+  R_ERROR
 } rudp_state;
 
 typedef struct {
@@ -48,6 +49,7 @@ typedef struct {
   int internal; // pipe from world to user
   pthread_mutex_t sync;
   pthread_cond_t close;
+  pthread_cond_t conn;
 
   // connection fields, only filled in for CONNECTED sockets
   uint16_t seq;
@@ -107,13 +109,23 @@ socket_unlock(rudp_socket_t *s) {
 }
 
 static void
-socket_wait(rudp_socket_t *s) {
+socket_wait_close(rudp_socket_t *s) {
   check(pthread_cond_wait(&s->close, &s->sync) == 0);
 }
 
 static void
-socket_signal(rudp_socket_t *s) {
+socket_wait_conn(rudp_socket_t *s) {
+  check(pthread_cond_wait(&s->conn, &s->sync) == 0);
+}
+
+static void
+socket_signal_close(rudp_socket_t *s) {
   check(pthread_cond_signal(&s->close) == 0);
+}
+
+static void
+socket_signal_conn(rudp_socket_t *s) {
+  check(pthread_cond_signal(&s->conn) == 0);
 }
 
 static void
@@ -121,10 +133,12 @@ do_connect(short revents, rudp_socket_t *sock) {
   if(revents | POLLIN) {
     // we've received a response
     sock->state = R_CONNECTED;
+    socket_signal_conn(sock);
   } else if(sock->last_sent - time(NULL) > 250 && sock->last_heard - time(NULL) < 60000) {
     // send an
   } else if(sock->last_heard - time(NULL) > 60000) {
     // etimeout
+    sock->state = R_ERROR;
   }
 }
 
@@ -156,7 +170,7 @@ runloop(void *arg) {
         case R_CLOSING:
           send_close(self.socks[i]);
           self.socks[i]->state = R_TERM;
-          socket_signal(self.socks[i]);
+          socket_signal_close(self.socks[i]);
           socket_unlock(self.socks[i]);
           break;
         case R_CONNECTING:
@@ -171,6 +185,8 @@ runloop(void *arg) {
           // not deleted yet, fall through
         case R_NONE:
           // not connected yet
+        case R_ERROR:
+          // couldn't connect
           break;
       }
       socket_unlock(self.socks[i]);
@@ -244,7 +260,7 @@ rudp_close(int fd) {
   if(s->state != R_TERM)
     s->state = R_CLOSING;
   while(s->state != R_TERM) {
-    socket_wait(s);
+    socket_wait_close(s);
   }
   socket_unlock(s);
   global_unlock();
