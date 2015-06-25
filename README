@@ -10,6 +10,7 @@ General goals:
  * unencrypted data is just four bytes for protocol \0r#{version}#{proto}
  * initial implementation is simply retry on packets, but for the future LEDBAT for congestion control?
  * fast-enough to handle hundreds of connections
+ * trust on first use
 
 Design:
  there should be a worker thread that polls an underlying unix socket, and feeds messages into a queue only accessible by that thread, those messages are doled out to the calling thread by calls to accept, select, send, connect, send and recv.
@@ -28,3 +29,42 @@ requirements:
  nacl or sodium or tweetnacl (included)
  basic posix
  pthreads
+
+Protocol:
+ client                           server
+ ----------------------------------------
+ HELLO
+ byte version
+ 32 bytes short term public key
+ random padding
+ ----------------------------------------
+                                  COOKIE
+                                  byte version
+                                  32 bytes short term public key
+                                  a cookie made up of
+                                  Secret Key encrypted with server
+                                  minute key and then client's public key
+                                  random padding
+ -----------------------------------------
+ INIT
+ byte version
+ cookie
+ message encrypted to short term public key
+ -----------------------------------------
+                                  DATA
+                                  byte version
+                                  message
+ -----------------------------------------
+ DATA
+ byte version
+ message
+
+
+message format
+ uint32_t seq
+ uint32_t ack
+ time_t timestamp
+ time_t delay
+ size_t size < max_packet_size
+
+
