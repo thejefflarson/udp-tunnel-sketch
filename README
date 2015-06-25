@@ -60,11 +60,15 @@ Protocol:
  message
 
 
-message format
+message format always 1088 - overhead - crypto_box_NONCEBYTES - crypto_box_PUBLICKEYBYTES
  uint32_t seq
  uint32_t ack
  time_t timestamp
  time_t delay
  size_t size < max_packet_size (1088 bytes)
+ data
+
+acks are sent every 500ms or combined with sending data
+the resending algorithm follows tcp vegas
 
 
