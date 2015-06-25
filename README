@@ -65,6 +65,6 @@ message format
  uint32_t ack
  time_t timestamp
  time_t delay
- size_t size < max_packet_size
+ size_t size < max_packet_size (1088 bytes)
 
 
