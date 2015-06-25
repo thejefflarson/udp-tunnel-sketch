@@ -10,11 +10,11 @@
 #include "tweetnacl.h"
 
 // handshake
-const uint8_t RUDP_HELLO = (1 << 0); // client -> server
-const uint8_t RUDP_HI    = (1 << 1); // server -> client
-const uint8_t RUDP_INIT  = (1 << 2); // client -> server
-const uint8_t RUDP_BYE   = (1 << 3); // close
-const uint8_t RUDP_DATA  = (1 << 4); // encrypted data
+const uint8_t RUDP_HELLO  = (1 << 0); // client -> server
+const uint8_t RUDP_COOKIE = (1 << 1); // server -> client
+const uint8_t RUDP_INIT   = (1 << 2); // client -> server
+const uint8_t RUDP_DATA   = (1 << 3); // encrypted data
+const uint8_t RUDP_BYE    = (1 << 4); // close
 
 #define RUDP_SECRET_SIZE 1088 - 2 - crypto_box_NONCEBYTES - crypto_box_PUBLICKEYBYTES
 typedef struct {
@@ -54,6 +54,7 @@ typedef struct {
   uint16_t ack;
   uint16_t rseq;
   time_t last_heard;
+  time_t last_sent;
   uint8_t their_key[crypto_box_PUBLICKEYBYTES];
   uint8_t pk[crypto_box_PUBLICKEYBYTES];
   uint8_t sk[crypto_box_SECRETKEYBYTES];
@@ -115,6 +116,18 @@ socket_signal(rudp_socket_t *s) {
   check(pthread_cond_signal(&s->close) == 0);
 }
 
+static void
+do_connect(short revents, rudp_socket_t *sock) {
+  if(revents | POLLIN) {
+    // we've received a response
+    sock->state = R_CONNECTED;
+  } else if(sock->last_sent - time(NULL) > 250 && sock->last_heard - time(NULL) < 60000) {
+    // send an
+  } else if(sock->last_heard - time(NULL) > 60000) {
+    // etimeout
+  }
+}
+
 // the whole shebang really -- this should be broken up and cleaned up
 static void *
 runloop(void *arg) {
@@ -147,11 +160,8 @@ runloop(void *arg) {
           socket_unlock(self.socks[i]);
           break;
         case R_CONNECTING:
-          if(fds[i].revents | POLLIN) {
-            char
-          } else {
+          do_connect(fds[i].revents, self.socks[i]);
 
-          }
           break;
         case R_LISTENING:
         case R_CONNECTED:

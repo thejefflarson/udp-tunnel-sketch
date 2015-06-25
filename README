@@ -23,6 +23,8 @@ Design:
 
  there should be useful global statistics reporting
 
+ connections are identified by connection public key to facilitate roaming. These keys are generated on a connection on connection basis.
+
 requirements:
  nacl or sodium or tweetnacl (included)
  basic posix
@@ -31,35 +33,35 @@ requirements:
 Protocol:
  client                           server
  ----------------------------------------
- HELLO
+ HELLO (repeats every 250ms until a response is heard)
  byte version
- 32 bytes short term public key
+ 32 bytes connection public key
  random padding
  ----------------------------------------
                                   COOKIE
                                   byte version
-                                  32 bytes short term public key
+                                  32 bytes connection public key
                                   a cookie made up of
-                                  short term Secret Key encrypted with server
+                                  connection Secret Key encrypted with server
                                   minute key and then client's public key
                                   random padding
  -----------------------------------------
  INIT
  byte version
- 32 bytes short term public key
+ 32 bytes connection public key
  cookie
  nonce
- message encrypted to short term public key
+ message encrypted to connection public key
  -----------------------------------------
                                   DATA
                                   byte version
-                                  32 bytes short term public key
+                                  32 bytes connection public key
                                   nonce
                                   message
  -----------------------------------------
  DATA
  byte version
- 32 bytes short term public key
+ 32 bytes connection public key
  nonce
  message
 
