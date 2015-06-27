@@ -142,6 +142,16 @@ do_connect(short revents, rudp_socket_t *sock) {
   }
 }
 
+static void
+do_send(rudp_socket_t *sock) {
+
+}
+
+static void
+do_recv(rudp_socket_t *sock) {
+
+}
+
 // the whole shebang really -- this should be broken up and cleaned up
 static void *
 runloop(void *arg) {
