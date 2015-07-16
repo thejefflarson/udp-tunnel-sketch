@@ -135,7 +135,7 @@ do_connect(short revents, rudp_socket_t *sock) {
     sock->state = R_CONNECTED;
     socket_signal_conn(sock);
   } else if(sock->last_sent - time(NULL) > 250 && sock->last_heard - time(NULL) < 60000) {
-    // send an
+    // send a connection attempt
   } else if(sock->last_heard - time(NULL) > 60000) {
     // etimeout
     sock->state = R_ERROR;
@@ -296,6 +296,37 @@ rudp_close(int fd) {
   }
   global_unlock();
 
+  return 0;
+}
+
+int
+rudp_connect(int fd, const struct sockaddr *address, socklen_t address_len) {
+  global_read_lock();
+  BASIC_CHECKS
+
+  rudp_socket_t *s = self.socks[fd];
+  socket_lock(s);
+  // TODO: better checks here, check for is connected EISCONN or is listening EOPNOTSUPP
+  if(s->state != R_NONE) {
+    socket_unlock(s);
+    errno = EISCONN;
+    return 1;
+  }
+
+  // connect socket
+  s->state = R_CONNECTING;
+
+  while(s->state == R_CONNECTING) {
+    socket_wait_conn(s);
+  }
+  if(s->state != R_CONNECTED) {
+    socket_unlock(s);
+    rudp_close(fd);
+    errno = ECONNREFUSED;
+    return 1;
+  }
+  socket_unlock(s);
+  global_unlock();
   return 0;
 }
 
