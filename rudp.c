@@ -143,12 +143,17 @@ do_connect(short revents, rudp_socket_t *sock) {
 }
 
 static void
-do_send(rudp_socket_t *sock) {
+do_send(rudp_socket_t *sock, short internal, short world) {
 
 }
 
 static void
-do_recv(rudp_socket_t *sock) {
+do_recv(rudp_socket_t *sock, short internal, short world) {
+
+}
+
+static void
+send_close(rudp_socket_t *sock) {
 
 }
 
@@ -188,8 +193,8 @@ runloop(void *arg) {
           break;
         case R_LISTENING:
         case R_CONNECTED:
-          do_recv(fds[i].revents, chans[i].revents, self.socks[i]);
-          do_send(fds[i].revents, chans[i].revents, self.socks[i]);
+          do_recv(self.socks[i], fds[i].revents, chans[i].revents);
+          do_send(self.socks[i], fds[i].revents, chans[i].revents);
           break;
         case R_TERM:
           // not deleted yet, fall through
