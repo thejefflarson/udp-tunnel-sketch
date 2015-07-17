@@ -52,6 +52,7 @@ typedef struct {
   pthread_cond_t conn;
 
   // connection fields, only filled in for CONNECTED sockets
+  const struct sockaddr *address;
   uint16_t seq;
   uint16_t ack;
   uint16_t rseq;
@@ -309,17 +310,21 @@ rudp_connect(int fd, const struct sockaddr *address, socklen_t address_len) {
   // TODO: better checks here, check for is connected EISCONN or is listening EOPNOTSUPP
   if(s->state != R_NONE) {
     socket_unlock(s);
-    errno = EISCONN;
+    if(s->state == R_CONNECTED) {
+      errno = EISCONN;
+    } else if(s->state == R_LISTENING) {
+      errno = EOPNOTSUPP;
+    }
     return 1;
   }
 
   // connect socket
   s->state = R_CONNECTING;
-
+  s->address = address;
   while(s->state == R_CONNECTING) {
     socket_wait_conn(s);
   }
-  if(s->state != R_CONNECTED) {
+  if(s->state == R_CONNECTED) {
     socket_unlock(s);
     rudp_close(fd);
     errno = ECONNREFUSED;
