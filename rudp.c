@@ -44,7 +44,6 @@ typedef enum {
 
 typedef struct {
   rudp_state state;
-  int world;    // our bound socket
   int user;     // interthread communication socket
   int internal; // pipe from world to user
   pthread_mutex_t sync;
@@ -63,8 +62,10 @@ typedef struct {
   uint8_t sk[crypto_box_SECRETKEYBYTES];
 } rudp_socket_t;
 
-#define RUDP_MAX_SOCKETS FD_SETSIZE
+#define RUDP_MAX_SOCKETS 1024
 typedef struct {
+  // our bound socket
+  int world;
   // listening sockets
   rudp_socket_t **socks;
   uint16_t nsocks;
@@ -135,14 +136,14 @@ do_connect(rudp_socket_t *sock, short revents) {
   if(revents | POLLIN) {
     // we've received a response
     rudp_packet_t data;
-    ssize_t size = recv(sock->world, &data, sizeof(data), NULL);
+    ssize_t size = recv(self.world, &data, sizeof(data), NULL);
     if(size != sizeof(data)) return;
     sock->state = R_CONNECTED;
     socket_signal_conn(sock);
   } else if(sock->last_sent - time(NULL) > 250 && sock->last_heard - time(NULL) < 60000) {
     // send a connection attempt
     rudp_packet_t data;
-    send(sock->world, &data, sizeof(data), NULL);
+    send(self.world, &data, sizeof(data), NULL);
   } else if(sock->last_heard - time(NULL) > 60000) {
     // etimeout
     sock->state = R_ERROR;
@@ -180,16 +181,16 @@ runloop(void *arg) {
       global_unlock();
       return NULL;
     }
-    struct pollfd fds[self.nsocks];
+    struct pollfd fds;
+    fds.fd = self.world;
+    fds.events = POLLIN | POLLOUT;
     struct pollfd chans[self.nsocks];
     for(int i = 0; i < self.nsocks; i++) {
-      fds[i].fd = self.socks[i]->world;
-      fds[i].events = POLLIN | POLLOUT;
       chans[i].fd = self.socks[i]->internal;
       chans[i].events = POLLIN | POLLOUT;
     }
 
-    poll(fds, self.nsocks, 100);
+    poll(&fds, 1, 100);
     poll(chans, self.nsocks, 100);
 
     for(int i = 0; i < self.nsocks; i++) {
@@ -202,13 +203,13 @@ runloop(void *arg) {
           socket_unlock(self.socks[i]);
           break;
         case R_CONNECTING:
-          do_connect(self.socks[i], fds[i].revents);
+          do_connect(self.socks[i], fds.revents);
           break;
         case R_LISTENING:
-          do_accept(self.socks[i], fds[i].revents);
+          do_accept(self.socks[i], fds.revents);
         case R_CONNECTED:
-          do_recv(self.socks[i], fds[i].revents, chans[i].revents);
-          do_send(self.socks[i], fds[i].revents, chans[i].revents);
+          do_recv(self.socks[i], fds.revents, chans[i].revents);
+          do_send(self.socks[i], fds.revents, chans[i].revents);
           break;
         case R_TERM:
           // not deleted yet, fall through
@@ -225,12 +226,14 @@ runloop(void *arg) {
 }
 
 
-static void
+static int
 rudp_global_init() {
   // always called with write lock held
   if(self.socks != NULL)
-    return;
+    return 0;
 
+  self.world = socket(PF_INET6, SOCK_DGRAM, 0);
+  if(self.world == -1) { return -1; }
   self.socks  = (rudp_socket_t **) calloc(RUDP_MAX_SOCKETS, sizeof(rudp_socket_t *));
   self.unused = (uint16_t *) calloc(RUDP_MAX_SOCKETS, sizeof(uint16_t));
   for(uint16_t i = 0; i != RUDP_MAX_SOCKETS; ++i)
@@ -238,24 +241,22 @@ rudp_global_init() {
 
   // off to the races
   pthread_create(&self.worker, NULL, &runloop, NULL);
+  return 0;
 }
 
 int
 rudp_socket(int type) {
   global_write_lock();
-  rudp_global_init();
+  if(rudp_global_init() < 0) { return -1; }
 
   if(self.nsocks >= RUDP_MAX_SOCKETS){
     errno = EMFILE;
     return -1;
   }
 
-  int lfd = socket(type, SOCK_DGRAM, 0);
-  if(lfd < 0) { return -1; }
-
   int pair[2];
   int err = socketpair(AF_UNIX, SOCK_DGRAM, 0, pair);
-  if(err < 0) { close(lfd);  return -1; }
+  if(err < 0) { return -1; }
 
   int fd = self.unused[RUDP_MAX_SOCKETS - self.nsocks - 1];
 
@@ -266,7 +267,6 @@ rudp_socket(int type) {
   check(err == 0);
   self.nsocks++;
   self.socks[fd] = sock;
-  self.socks[fd]->world = lfd;
   self.socks[fd]->user = pair[0];
   self.socks[fd]->internal = pair[1];
   global_unlock();
@@ -296,7 +296,6 @@ rudp_close(int fd) {
 
   global_write_lock();
   if(self.socks[fd] != NULL) {
-    close(self.socks[fd]->world);
     close(self.socks[fd]->user);
     close(self.socks[fd]->internal);
     free(self.socks[fd]);
@@ -349,19 +348,12 @@ rudp_connect(int fd, const struct sockaddr *address, socklen_t address_len) {
 }
 
 int
-rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
-  global_read_lock();
-  BASIC_CHECKS
-
-  rudp_socket_t *s = self.socks[fd];
-
-  socket_lock(s);
-  int rc = bind(s->world, address, address_len);
-  if(rc < -1) { s->world = 0; socket_unlock(s); return -1; }
-  s->state = R_LISTENING;
-  socket_unlock(s);
+rudp_bind(const struct sockaddr *address, socklen_t address_len) {
+  global_write_lock();
+  rudp_global_init();
+  int rc = bind(self.world, address, address_len);
+  if(rc < -1) { return -1; }
   global_unlock();
-
   return 0;
 }
 
