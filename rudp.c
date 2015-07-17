@@ -66,6 +66,7 @@ typedef struct {
 typedef struct {
   // our bound socket
   int world;
+  bool bound;
   // listening sockets
   rudp_socket_t **socks;
   uint16_t nsocks;
@@ -187,12 +188,14 @@ runloop(void *arg) {
     struct pollfd chans[self.nsocks];
     for(int i = 0; i < self.nsocks; i++) {
       chans[i].fd = self.socks[i]->internal;
-      chans[i].events = POLLIN | POLLOUT;
+      chans[i].events = POLLIN;
     }
 
     poll(&fds, 1, 100);
+    // handle doling in and out
     poll(chans, self.nsocks, 100);
 
+    // sending
     for(int i = 0; i < self.nsocks; i++) {
       socket_lock(self.socks[i]);
       switch(self.socks[i]->state) {
@@ -208,7 +211,6 @@ runloop(void *arg) {
         case R_LISTENING:
           do_accept(self.socks[i], fds.revents);
         case R_CONNECTED:
-          do_recv(self.socks[i], fds.revents, chans[i].revents);
           do_send(self.socks[i], fds.revents, chans[i].revents);
           break;
         case R_TERM:
@@ -233,7 +235,7 @@ rudp_global_init() {
     return 0;
 
   self.world = socket(PF_INET6, SOCK_DGRAM, 0);
-  if(self.world == -1) { return -1; }
+  if(self.world < 0) { return -1; }
   self.socks  = (rudp_socket_t **) calloc(RUDP_MAX_SOCKETS, sizeof(rudp_socket_t *));
   self.unused = (uint16_t *) calloc(RUDP_MAX_SOCKETS, sizeof(uint16_t));
   for(uint16_t i = 0; i != RUDP_MAX_SOCKETS; ++i)
@@ -274,7 +276,8 @@ rudp_socket(int type) {
   return fd;
 }
 
-#define BASIC_CHECKS if(self.socks == NULL || fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){ \
+// TODO: split this up into better error messages
+#define BASIC_CHECKS if(!self.bound || self.world < 0 || self.socks == NULL || fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){ \
   errno = EBADF; \
   return -1; \
 }
@@ -353,6 +356,7 @@ rudp_bind(const struct sockaddr *address, socklen_t address_len) {
   rudp_global_init();
   int rc = bind(self.world, address, address_len);
   if(rc < -1) { return -1; }
+  self.bound = true;
   global_unlock();
   return 0;
 }
