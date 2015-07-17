@@ -130,17 +130,29 @@ socket_signal_conn(rudp_socket_t *s) {
 }
 
 static void
-do_connect(short revents, rudp_socket_t *sock) {
+do_connect(rudp_socket_t *sock, short revents) {
+  socket_lock(sock);
   if(revents | POLLIN) {
     // we've received a response
+    rudp_packet_t data;
+    ssize_t size = recv(sock->world, &data, sizeof(data), NULL);
+    if(size != sizeof(data)) return;
     sock->state = R_CONNECTED;
     socket_signal_conn(sock);
   } else if(sock->last_sent - time(NULL) > 250 && sock->last_heard - time(NULL) < 60000) {
     // send a connection attempt
+    rudp_packet_t data;
+    send(sock->world, &data, sizeof(data), NULL);
   } else if(sock->last_heard - time(NULL) > 60000) {
     // etimeout
     sock->state = R_ERROR;
   }
+  socket_unlock(sock);
+}
+
+static void
+do_accept(rudp_socket_t *sock, short revents) {
+
 }
 
 static void
@@ -190,9 +202,10 @@ runloop(void *arg) {
           socket_unlock(self.socks[i]);
           break;
         case R_CONNECTING:
-          do_connect(fds[i].revents, self.socks[i]);
+          do_connect(self.socks[i], fds[i].revents);
           break;
         case R_LISTENING:
+          do_accept(self.socks[i], fds[i].revents);
         case R_CONNECTED:
           do_recv(self.socks[i], fds[i].revents, chans[i].revents);
           do_send(self.socks[i], fds[i].revents, chans[i].revents);
@@ -261,7 +274,7 @@ rudp_socket(int type) {
   return fd;
 }
 
-#define BASIC_CHECKS if(fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){ \
+#define BASIC_CHECKS if(self.socks == NULL || fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){ \
   errno = EBADF; \
   return -1; \
 }
