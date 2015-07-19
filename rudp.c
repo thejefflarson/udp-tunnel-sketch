@@ -34,6 +34,7 @@ typedef struct {
 
 typedef enum {
   R_NONE = 0,
+  R_BOUND,
   R_LISTENING,
   R_CONNECTING,
   R_CONNECTED,
@@ -135,14 +136,14 @@ do_connect(rudp_socket_t *sock, short revents) {
   if(revents | POLLIN) {
     // we've received a response
     rudp_packet_t data;
-    ssize_t size = recv(sock->world, &data, sizeof(data), NULL);
+    ssize_t size = recv(sock->world, &data, sizeof(data), 0);
     if(size != sizeof(data)) return;
     sock->state = R_CONNECTED;
     socket_signal_conn(sock);
   } else if(sock->last_sent - time(NULL) > 250 && sock->last_heard - time(NULL) < 60000) {
     // send a connection attempt
     rudp_packet_t data;
-    send(sock->world, &data, sizeof(data), NULL);
+    send(sock->world, &data, sizeof(data), 0);
   } else if(sock->last_heard - time(NULL) > 60000) {
     // etimeout
     sock->state = R_ERROR;
@@ -262,8 +263,6 @@ rudp_socket(int type) {
   rudp_socket_t *sock = (rudp_socket_t  *) calloc(1, sizeof(rudp_socket_t));
   err = pthread_mutex_init(&sock->sync, NULL);
   check(err == 0);
-  err = pthread_cond_wait(&sock->close, NULL);
-  check(err == 0);
   self.nsocks++;
   self.socks[fd] = sock;
   self.socks[fd]->world = lfd;
@@ -337,7 +336,7 @@ rudp_connect(int fd, const struct sockaddr *address, socklen_t address_len) {
   while(s->state == R_CONNECTING) {
     socket_wait_conn(s);
   }
-  if(s->state == R_CONNECTED) {
+  if(s->state != R_CONNECTED) {
     socket_unlock(s);
     rudp_close(fd);
     errno = ECONNREFUSED;
@@ -358,11 +357,16 @@ rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
   socket_lock(s);
   int rc = bind(s->world, address, address_len);
   if(rc < -1) { s->world = 0; socket_unlock(s); return -1; }
-  s->state = R_LISTENING;
+  s->state = R_BOUND;
   socket_unlock(s);
   global_unlock();
 
   return 0;
+}
+
+int
+rudp_listen(int fd, int backlog){
+
 }
 
 #define SIZE_CHECK if(length > RUDP_DATA_SIZE) { \
