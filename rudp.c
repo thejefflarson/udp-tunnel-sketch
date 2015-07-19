@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "rudp.h"
@@ -20,6 +21,7 @@ const uint8_t RUDP_BYE    = (1 << 4); // close
 typedef struct {
   uint8_t proto;
   uint8_t version;
+  uint8_t pk[crypto_box_PUBLICKEYBYTES];
   uint8_t nonce[crypto_box_NONCEBYTES];
   uint8_t encrypted[RUDP_SECRET_SIZE]; // always encrypted
 } __attribute__((packed)) rudp_packet_t;
@@ -143,6 +145,11 @@ do_connect(rudp_socket_t *sock, short revents) {
   } else if(sock->last_sent - time(NULL) > 250 && sock->last_heard - time(NULL) < 60000) {
     // send a connection attempt
     rudp_packet_t data;
+    data.proto = RUDP_HELLO;
+    crypto_box_keypair(sock->pk, sock->sk);
+    memcpy(data.pk, sock->pk, crypto_box_PUBLICKEYBYTES);
+    randombytes(data.nonce, crypto_box_NONCEBYTES);
+    randombytes(data.encrypted, RUDP_SECRET_SIZE);
     send(sock->world, &data, sizeof(data), 0);
   } else if(sock->last_heard - time(NULL) > 60000) {
     // etimeout
@@ -207,10 +214,13 @@ runloop(void *arg) {
           break;
         case R_LISTENING:
           do_accept(self.socks[i], fds[i].revents);
+          break;
         case R_CONNECTED:
           do_recv(self.socks[i], fds[i].revents, chans[i].revents);
           do_send(self.socks[i], fds[i].revents, chans[i].revents);
           break;
+        case R_BOUND:
+          //bound but not listening or connected
         case R_TERM:
           // not deleted yet, fall through
         case R_NONE:
