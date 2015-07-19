@@ -3,9 +3,8 @@ udp-tunnel-sketch
 
 
 General goals:
- * posix-like api -- one exception, it only uses a single socket, everything is multiplexed. thus bind is a global call.
+ * posix-like api
  * strong cryptography, following the ideas of curvecp -- but no protection against mitm attacks, no trusted CAs
- * ipv6 only because it is 2015 already
  * resistance to replay attacks
  * resistance to DDOS attacks, no allocations on server-side connections
  * unencrypted data is just four bytes for protocol \0r#{version}#{proto}
@@ -14,7 +13,7 @@ General goals:
  * trust on first use
 
 Design:
- there should be a worker thread that polls the underlying unix socket, and feeds messages into a queue only accessible by that thread, those messages are doled out to the calling thread by calls to accept, select, send, connect, send and recv.
+ there should be a worker thread that polls an underlying unix socket, and feeds messages into a queue only accessible by that thread, those messages are doled out to the calling thread by calls to accept, select, send, connect, send and recv.
 
  the worker thread polls the parent fd, and fills in buffers independent of calls to recv, and writes to the socket pair: https://www.gnu.org/software/libc/manual/html_node/Socket-Pairs.html
 
@@ -25,8 +24,6 @@ Design:
  there should be useful global statistics reporting
 
  connections are identified by connection public key to facilitate roaming. These keys are generated on a connection on connection basis.
-
- there is only one bound socket and connections are multiplexed through it.
 
 requirements:
  nacl or sodium or tweetnacl (included)
