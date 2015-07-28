@@ -26,11 +26,11 @@ typedef struct {
   uint8_t encrypted[RUDP_SECRET_SIZE]; // always encrypted
 } __attribute__((packed)) rudp_packet_t;
 
-#define RUDP_DATA_SIZE RUDP_SECRET_SIZE - 4 - crypto_box_ZEROBYTES
+#define RUDP_DATA_SIZE RUDP_SECRET_SIZE - 8 - crypto_box_ZEROBYTES
 typedef struct {
   uint8_t padding[crypto_box_ZEROBYTES];
-  uint16_t ack;
-  uint16_t seq;
+  uint32_t ack;
+  uint32_t seq;
   uint8_t data[RUDP_DATA_SIZE];
 } __attribute__((packed)) rudp_secret_t;
 
