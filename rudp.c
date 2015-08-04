@@ -339,12 +339,14 @@ rudp_connect(int fd, const struct sockaddr *address, socklen_t address_len) {
     } else if(s->state == R_LISTENING) {
       errno = EOPNOTSUPP;
     }
-    return 1;
+    return -1;
   }
 
   // connect socket
-  s->state = R_CONNECTING;
-  s->address = address;
+
+  int rc = connect(s->world, address, address_len);
+  if(rc == -1) { socket_unlock(s); return rc; }
+  s->state = R_CONNECTING;;
   while(s->state == R_CONNECTING) {
     socket_wait_conn(s);
   }
@@ -368,7 +370,7 @@ rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
 
   socket_lock(s);
   int rc = bind(s->world, address, address_len);
-  if(rc < -1) { s->world = 0; socket_unlock(s); return -1; }
+  if(rc == -1) { s->world = 0; socket_unlock(s); return rc; }
   s->state = R_BOUND;
   socket_unlock(s);
   global_unlock();
