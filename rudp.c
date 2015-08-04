@@ -138,7 +138,8 @@ do_connect(rudp_socket_t *sock, short revents) {
     // we've received a response
     rudp_packet_t data;
     struct sockaddr addr;
-    ssize_t size = recv(sock->world, &data, sizeof(data), 0, &addr, sizeof(addr));
+    socklen_t len;
+    ssize_t size = recvfrom(sock->world, &data, sizeof(data), 0, &addr, &len);
     if(size != sizeof(data)) return;
     connect(sock->world, &addr, sizeof(addr));
     sock->state = R_CONNECTED;
