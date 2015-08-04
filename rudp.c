@@ -55,7 +55,6 @@ typedef struct {
   pthread_cond_t conn;
 
   // connection fields, only filled in for CONNECTED sockets
-  const struct sockaddr *address;
   uint16_t seq;
   uint16_t ack;
   uint16_t rseq;
@@ -138,8 +137,10 @@ do_connect(rudp_socket_t *sock, short revents) {
   if(revents | POLLIN) {
     // we've received a response
     rudp_packet_t data;
-    ssize_t size = recv(sock->world, &data, sizeof(data), 0);
+    struct sockaddr addr;
+    ssize_t size = recv(sock->world, &data, sizeof(data), 0, &addr, sizeof(addr));
     if(size != sizeof(data)) return;
+    connect(sock->world, &addr, sizeof(addr));
     sock->state = R_CONNECTED;
     socket_signal_conn(sock);
   } else if(sock->last_sent - time(NULL) > 250 && sock->last_heard - time(NULL) < 60000) {
