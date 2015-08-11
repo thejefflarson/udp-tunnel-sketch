@@ -272,7 +272,7 @@ rudp_socket(int type) {
 
   int fd = self.unused[RUDP_MAX_SOCKETS - self.nsocks - 1];
 
-  rudp_socket_t *sock = (rudp_socket_t  *) calloc(1, sizeof(rudp_socket_t));
+  rudp_socket_t *sock = (rudp_socket_t *) calloc(1, sizeof(rudp_socket_t));
   err = pthread_mutex_init(&sock->sync, NULL);
   check(err == 0);
   self.nsocks++;
