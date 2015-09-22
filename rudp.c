@@ -131,20 +131,29 @@ socket_signal_conn(rudp_socket_t *s) {
   check(pthread_cond_signal(&s->conn) == 0);
 }
 
+
 static void
 do_connect(rudp_socket_t *sock, short revents) {
   socket_lock(sock);
   if(revents | POLLIN) {
-    // we've received a response
+    // we've received a response, should be a function for accept
     rudp_packet_t data;
     struct sockaddr addr;
     socklen_t len;
     ssize_t size = recvfrom(sock->world, &data, sizeof(data), 0, &addr, &len);
     if(size != sizeof(data)) return;
+    if(data.proto != RUDP_COOKIE) return;
+    memcpy(sock->their_key, data.pk, crypto_box_PUBLICKEYBYTES);
     connect(sock->world, &addr, sizeof(addr));
     sock->state = R_CONNECTED;
+    rudp_secret_t secret;
+    secret.seq = 1;
+    secret.ack = 1;
+    randombytes(secret.data, RUDP_SECRET_SIZE);
+    // copy over cookie
+    // memcpy();
     socket_signal_conn(sock);
-  } else if(sock->last_sent - time(NULL) > 250 && sock->last_heard - time(NULL) < 60000) {
+  } else if(sock->last_sent - time(NULL) > 50 && sock->last_heard - time(NULL) < 60000) {
     // send a connection attempt
     rudp_packet_t data;
     data.proto = RUDP_HELLO;
@@ -380,7 +389,19 @@ rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
 
 int
 rudp_listen(int fd, int backlog){
+  global_read_lock();
+  BASIC_CHECKS
 
+  rudp_socket_t *s = self.socks[fd];
+  if(s->state == R_LISTENING) { socket_unlock(s); errno = EINVAL; return -1; }
+  if(s->state != R_BOUND) { socket_unlock(s); errno = EDESTADDRREQ; return -1; }
+  socket_lock(s);
+  s->state = R_LISTENING;
+  // TODO: implement backlog
+  socket_unlock(s);
+  global_unlock();
+
+  return 0;
 }
 
 #define SIZE_CHECK if(length > RUDP_DATA_SIZE) { \

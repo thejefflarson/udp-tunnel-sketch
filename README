@@ -49,9 +49,8 @@ Protocol:
  INIT
  byte version
  32 bytes connection public key
- cookie
  nonce
- message encrypted to connection public key
+ message with encrypted cookie
  -----------------------------------------
                                   DATA
                                   byte version
@@ -75,7 +74,6 @@ message format encrypted
  size_t size < max_packet_size (1088 bytes)
  data
 
-acks are sent every 500ms or combined with sending data
 the resending algorithm follows tcp vegas
 
 
