@@ -193,7 +193,6 @@ send_close(rudp_socket_t *sock) {
 static void *
 runloop(void *arg) {
   while(1) {
-    // we lock here to make a copy of our open sockets
     global_read_lock();
     if(self.nsocks == 0) {
       global_unlock();
