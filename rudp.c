@@ -143,15 +143,27 @@ do_connect(rudp_socket_t *sock, short revents) {
     ssize_t size = recvfrom(sock->world, &data, sizeof(data), 0, &addr, &len);
     if(size != sizeof(data)) return;
     if(data.proto != RUDP_COOKIE) return;
+    // copy over cookie
+    data.proto = RUDP_INIT;
+    memcpy(data.pk, sock->pk, crypto_box_PUBLICKEYBYTES);
+    rudp_secret_t secret;
+    memset(&secret, 0, sizeof(secret));
+    int err = crypto_box_open((uint8_t *)&secret, data.encrypted, RUDP_SECRET_SIZE, data.nonce, data.pk, sock->sk);
+    if(!err) return;
     memcpy(sock->their_key, data.pk, crypto_box_PUBLICKEYBYTES);
     connect(sock->world, &addr, sizeof(addr));
-    sock->state = R_CONNECTED;
-    rudp_secret_t secret;
+    rudp_secret_t ret;
+    memset(&ret, 0, sizeof(ret));
     secret.seq = 1;
     secret.ack = 1;
-    randombytes(secret.data, RUDP_SECRET_SIZE);
-    // copy over cookie
-    // memcpy();
+    randombytes(data.nonce, crypto_box_NONCEBYTES);
+    randombytes(ret.data, RUDP_SECRET_SIZE);
+    crypto_box((uint8_t *)&ret, (uint8_t *)&secret, RUDP_SECRET_SIZE, data.nonce, sock->their_key, sock->sk);
+    memcpy(data.encrypted, &ret, sizeof(ret));
+    memcpy(data.pk, sock->pk, crypto_box_PUBLICKEYBYTES);
+    data.proto = RUDP_INIT;
+    send(sock->world, &data, sizeof(data), 0);
+    sock->state = R_CONNECTED;
     socket_signal_conn(sock);
   } else if(sock->last_sent - time(NULL) > 50 && sock->last_heard - time(NULL) < 60000) {
     // send a connection attempt
