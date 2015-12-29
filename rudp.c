@@ -135,8 +135,7 @@ socket_signal_conn(rudp_socket_t *s) {
 static void
 do_connect(rudp_socket_t *sock, short revents) {
   socket_lock(sock);
-  if(revents | POLLIN) {
-    // we've received a response, should be a function for accept
+  if(revents & POLLIN) {
     rudp_packet_t data;
     struct sockaddr addr;
     socklen_t len;
@@ -165,8 +164,8 @@ do_connect(rudp_socket_t *sock, short revents) {
     send(sock->world, &data, sizeof(data), 0);
     sock->state = R_CONNECTED;
     socket_signal_conn(sock);
-  } else if(sock->last_sent - time(NULL) > 50 && sock->last_heard - time(NULL) < 60000) {
-    // send a connection attempt
+  } else if(sock->last_heard == 0 || (time(NULL) - sock->last_sent > 50 && sock->last_heard - time(NULL) < 60000)) {
+    // (re)send a connection attempt
     rudp_packet_t data;
     data.proto = RUDP_HELLO;
     crypto_box_keypair(sock->pk, sock->sk);
@@ -183,7 +182,11 @@ do_connect(rudp_socket_t *sock, short revents) {
 
 static void
 do_accept(rudp_socket_t *sock, short revents) {
+  if(revents & POLLIN) {
+    socket_lock(sock);
 
+    socket_unlock(sock);
+  }
 }
 
 static void
@@ -300,6 +303,7 @@ rudp_socket(int type) {
   self.socks[fd]->world = lfd;
   self.socks[fd]->user = pair[0];
   self.socks[fd]->internal = pair[1];
+  self.socks[fd]->last_heard = 0;
   global_unlock();
 
   return fd;
@@ -353,17 +357,16 @@ rudp_connect(int fd, const struct sockaddr *address, socklen_t address_len) {
   socket_lock(s);
   // TODO: better checks here, check for is connected EISCONN or is listening EOPNOTSUPP
   if(s->state != R_NONE) {
-    socket_unlock(s);
     if(s->state == R_CONNECTED) {
       errno = EISCONN;
     } else if(s->state == R_LISTENING) {
       errno = EOPNOTSUPP;
     }
+    socket_unlock(s);
     return -1;
   }
 
   // connect socket
-
   int rc = connect(s->world, address, address_len);
   if(rc == -1) { socket_unlock(s); return rc; }
   s->state = R_CONNECTING;;
@@ -382,6 +385,39 @@ rudp_connect(int fd, const struct sockaddr *address, socklen_t address_len) {
 }
 
 int
+rudp_accept(int fd, struct sockaddr *address, socklen_t *address_len){
+  global_read_lock();
+  BASIC_CHECKS
+
+  rudp_socket_t *s = self.socks[fd];
+  socket_lock(s);
+  if(s->state != R_LISTENING) {
+    if(s->state == R_CONNECTED) {
+      errno = EISCONN;
+    } else {
+      errno = EOPNOTSUPP;
+    }
+    socket_unlock(s);
+    return -1;
+  }
+  socket_unlock(s);
+
+  // TODO: async
+  uint8_t new_fd;
+  int r = read(s->user, &new_fd, sizeof(new_fd));
+  global_unlock();
+  if(r == -1) return r;
+
+  global_read_lock();
+  s = self.socks[new_fd];
+  r = getsockname(s->world, address, address_len);
+  global_unlock();
+
+  if(r == -1) return r;
+  return new_fd;
+}
+
+int
 rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
   global_read_lock();
   BASIC_CHECKS
@@ -390,7 +426,7 @@ rudp_bind(int fd, const struct sockaddr *address, socklen_t address_len) {
 
   socket_lock(s);
   int rc = bind(s->world, address, address_len);
-  if(rc == -1) { s->world = 0; socket_unlock(s); return rc; }
+  if(rc == -1) { socket_unlock(s); return rc; }
   s->state = R_BOUND;
   socket_unlock(s);
   global_unlock();
