@@ -60,7 +60,8 @@ typedef struct {
   uint16_t rseq;
   time_t last_heard;
   time_t last_sent;
-  uint8_t their_key[crypto_box_PUBLICKEYBYTES];
+  uint8_t their_longkey[crypto_box_PUBLICKEYBYTES];
+  uint8_t their_shortkey[crypto_box_PUBLICKEYBYTES];
   uint8_t pk[crypto_box_PUBLICKEYBYTES];
   uint8_t sk[crypto_box_SECRETKEYBYTES];
 } rudp_socket_t;
@@ -142,14 +143,14 @@ do_connect(rudp_socket_t *sock, short revents) {
     ssize_t size = recvfrom(sock->world, &data, sizeof(data), 0, &addr, &len);
     if(size != sizeof(data)) return;
     if(data.proto != RUDP_COOKIE) return;
-    // copy over cookie
-    data.proto = RUDP_INIT;
-    memcpy(data.pk, sock->pk, crypto_box_PUBLICKEYBYTES);
+    if(crypto_verify_32(sock->their_longkey, data.pk)) return;
     rudp_secret_t secret;
     memset(&secret, 0, sizeof(secret));
     int err = crypto_box_open((uint8_t *)&secret, data.encrypted, RUDP_SECRET_SIZE, data.nonce, data.pk, sock->sk);
     if(!err) return;
-    memcpy(sock->their_key, data.pk, crypto_box_PUBLICKEYBYTES);
+    if(crypto_verify_32(sock->pk, secret.data + crypto_box_PUBLICKEYBYTES)) return;
+    memcpy(sock->their_shortkey, secret.data, crypto_box_PUBLICKEYBYTES);
+    memcpy(secret.data, sock->pk, crypto_box_PUBLICKEYBYTES);
     connect(sock->world, &addr, sizeof(addr));
     rudp_secret_t ret;
     memset(&ret, 0, sizeof(ret));
@@ -157,7 +158,7 @@ do_connect(rudp_socket_t *sock, short revents) {
     secret.ack = 1;
     randombytes(data.nonce, crypto_box_NONCEBYTES);
     randombytes(ret.data, RUDP_SECRET_SIZE);
-    crypto_box((uint8_t *)&ret, (uint8_t *)&secret, RUDP_SECRET_SIZE, data.nonce, sock->their_key, sock->sk);
+    crypto_box((uint8_t *)&ret, (uint8_t *)&secret, RUDP_SECRET_SIZE, data.nonce, sock->their_shortkey, sock->sk);
     memcpy(data.encrypted, &ret, sizeof(ret));
     memcpy(data.pk, sock->pk, crypto_box_PUBLICKEYBYTES);
     data.proto = RUDP_INIT;

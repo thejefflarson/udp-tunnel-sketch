@@ -4,7 +4,7 @@ udp-tunnel-sketch
 
 General goals:
  * posix-like api
- * strong cryptography, following the ideas of curvecp -- but no protection against mitm attacks, no trusted CAs
+ * strong cryptography, following the ideas of curvecp -- skipping client auth
  * resistance to replay attacks
  * resistance to DDOS attacks, no allocations on server-side connections
  * unencrypted data is just four bytes for protocol \0r#{version}#{proto}
@@ -22,7 +22,7 @@ Design:
 
  there should be useful global statistics reporting
 
- connections are identified by connection public key to facilitate roaming. These keys are generated on a connection on connection basis.
+ connections are identified by connection public key to facilitate server and client roaming. These keys are generated on a connection on connection basis.
 
 requirements:
  nacl or sodium or tweetnacl (included)
@@ -32,30 +32,32 @@ requirements:
 Protocol:
  client                           server
  ----------------------------------------
- HELLO (repeats every 250ms until a response is heard)
+ HELLO
  byte version
  32 bytes connection public key
  random padding
  ----------------------------------------
                                   COOKIE
                                   byte version
-                                  32 bytes connection public key
-                                  a cookie made up of
-                                  connection Secret Key encrypted with server
-                                  minute key and then client's public key
+                                  32 bytes long term public key
+                                  (Connection Public key
+                                  Secret Key encrypted with server's minute key)
+                                  encrypted with server public key and
+                                  client's public key
                                   random padding
  -----------------------------------------
  INIT
  byte version
  32 bytes connection public key
  nonce
- message with encrypted cookie
+ encrypted cookie
+ encrypted message
  -----------------------------------------
                                   DATA
                                   byte version
                                   32 bytes connection public key
                                   nonce
-                                  message
+                                  encrypted message
  -----------------------------------------
  DATA
  byte version
