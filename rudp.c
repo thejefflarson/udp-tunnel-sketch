@@ -64,6 +64,9 @@ typedef struct {
   uint8_t their_shortkey[crypto_box_PUBLICKEYBYTES];
   uint8_t pk[crypto_box_PUBLICKEYBYTES];
   uint8_t sk[crypto_box_SECRETKEYBYTES];
+  // for encrypting cookie packets rotates every 2 minutes
+  uint8_t cpk[crypto_box_PUBLICKEYBYTES];
+  uint8_t csk[crypto_box_SECRETKEYBYTES];
 } rudp_socket_t;
 
 #define RUDP_MAX_SOCKETS FD_SETSIZE
@@ -74,9 +77,6 @@ typedef struct {
   // idea stolen from how nanomsg handles it
   uint16_t *unused;
   pthread_t worker;
-  // for encrypting cookie packets rotates every 2 minutes
-  uint8_t cpk[crypto_box_PUBLICKEYBYTES];
-  uint8_t csk[crypto_box_SECRETKEYBYTES];
   time_t last_update;
   int init;
 } rudp_global_t;
@@ -132,15 +132,45 @@ socket_signal_conn(rudp_socket_t *s) {
   check(pthread_cond_signal(&s->conn) == 0);
 }
 
+static int
+create_socket(int domain) {
+  if(self.nsocks >= RUDP_MAX_SOCKETS){
+    errno = EMFILE;
+    return -1;
+  }
+
+  if(domain != AF_INET || domain != AF_INET6) {
+    errno = EAFNOSUPPORT;
+    return -1;
+  }
+
+  int lfd = socket(domain, SOCK_DGRAM, 0);
+  if(lfd < 0) { return -1; }
+
+  int pair[2];
+  int err = socketpair(AF_UNIX, SOCK_DGRAM, 0, pair);
+  if(err < 0) { close(lfd);  return -1; }
+
+  int fd = self.unused[RUDP_MAX_SOCKETS - self.nsocks - 1];
+
+  rudp_socket_t *sock = (rudp_socket_t *) calloc(1, sizeof(rudp_socket_t));
+  err = pthread_mutex_init(&sock->sync, NULL);
+  check(err == 0);
+  self.nsocks++;
+  self.socks[fd] = sock;
+  self.socks[fd]->world = lfd;
+  self.socks[fd]->user = pair[0];
+  self.socks[fd]->internal = pair[1];
+  self.socks[fd]->last_heard = 0;
+
+  return fd;
+}
 
 static void
 do_connect(rudp_socket_t *sock, short revents) {
-  socket_lock(sock);
   if(revents & POLLIN) {
     rudp_packet_t data;
-    struct sockaddr addr;
-    socklen_t len;
-    ssize_t size = recvfrom(sock->world, &data, sizeof(data), 0, &addr, &len);
+    ssize_t size = recv(sock->world, &data, sizeof(data), 0);
     if(size != sizeof(data)) return;
     if(data.proto != RUDP_COOKIE) return;
     if(crypto_verify_32(sock->their_longkey, data.pk)) return;
@@ -151,7 +181,6 @@ do_connect(rudp_socket_t *sock, short revents) {
     if(crypto_verify_32(sock->pk, secret.data + crypto_box_PUBLICKEYBYTES)) return;
     memcpy(sock->their_shortkey, secret.data, crypto_box_PUBLICKEYBYTES);
     memcpy(secret.data, sock->pk, crypto_box_PUBLICKEYBYTES);
-    connect(sock->world, &addr, sizeof(addr));
     rudp_secret_t ret;
     memset(&ret, 0, sizeof(ret));
     secret.seq = 1;
@@ -178,15 +207,40 @@ do_connect(rudp_socket_t *sock, short revents) {
     // etimeout
     sock->state = R_ERROR;
   }
-  socket_unlock(sock);
 }
 
 static void
 do_accept(rudp_socket_t *sock, short revents) {
   if(revents & POLLIN) {
-    socket_lock(sock);
-
-    socket_unlock(sock);
+    rudp_packet_t data;
+    struct sockaddr addr;
+    socklen_t len;
+    ssize_t size = recvfrom(sock->world, &data, sizeof(data), 0, &addr, &len);
+    if(size != sizeof(data))  return;
+    switch(data.proto) {
+      case RUDP_HELLO: {
+        rudp_packet_t data;
+        uint8_t pk[crypto_box_PUBLICKEYBYTES], sk[crypto_box_SECRETKEYBYTES];
+        crypto_box_keypair(pk, sk);
+        memcpy(data.pk, sock->pk, crypto_box_PUBLICKEYBYTES);
+        // tktktk
+        break;
+      }
+      case RUDP_INIT: {
+        global_write_lock();
+        int fd = create_socket(addr.sa_family);
+        global_unlock();
+        if(fd == -1) return;
+        rudp_socket_t *new_sock = self.socks[fd];
+        connect(new_sock->world, &addr, len);
+        struct sockaddr original;
+        socklen_t len = sizeof(original);
+        getsockname(new_sock->world, &original, &len);
+        bind(new_sock->world, &original, len);
+        send(sock->internal, &fd, sizeof(fd), 0);
+        break;
+      }
+    }
   }
 }
 
@@ -218,9 +272,9 @@ runloop(void *arg) {
     struct pollfd chans[self.nsocks];
     for(int i = 0; i < self.nsocks; i++) {
       fds[i].fd = self.socks[i]->world;
-      fds[i].events = POLLIN | POLLOUT;
+      fds[i].events = POLLIN;
       chans[i].fd = self.socks[i]->internal;
-      chans[i].events = POLLIN | POLLOUT;
+      chans[i].events = POLLIN;
     }
 
     poll(fds, self.nsocks, 100);
@@ -246,7 +300,7 @@ runloop(void *arg) {
           do_send(self.socks[i], fds[i].revents, chans[i].revents);
           break;
         case R_BOUND:
-          //bound but not listening or connected
+          // bound but not listening or connected
         case R_TERM:
           // not deleted yet, fall through
         case R_NONE:
@@ -282,29 +336,8 @@ rudp_socket(int type) {
   global_write_lock();
   rudp_global_init();
 
-  if(self.nsocks >= RUDP_MAX_SOCKETS){
-    errno = EMFILE;
-    return -1;
-  }
+  int fd = create_socket(type);
 
-  int lfd = socket(type, SOCK_DGRAM, 0);
-  if(lfd < 0) { return -1; }
-
-  int pair[2];
-  int err = socketpair(AF_UNIX, SOCK_DGRAM, 0, pair);
-  if(err < 0) { close(lfd);  return -1; }
-
-  int fd = self.unused[RUDP_MAX_SOCKETS - self.nsocks - 1];
-
-  rudp_socket_t *sock = (rudp_socket_t *) calloc(1, sizeof(rudp_socket_t));
-  err = pthread_mutex_init(&sock->sync, NULL);
-  check(err == 0);
-  self.nsocks++;
-  self.socks[fd] = sock;
-  self.socks[fd]->world = lfd;
-  self.socks[fd]->user = pair[0];
-  self.socks[fd]->internal = pair[1];
-  self.socks[fd]->last_heard = 0;
   global_unlock();
 
   return fd;
