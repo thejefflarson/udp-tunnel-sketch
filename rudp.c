@@ -162,7 +162,8 @@ create_socket(int domain) {
   self.socks[fd]->user = pair[0];
   self.socks[fd]->internal = pair[1];
   self.socks[fd]->last_heard = 0;
-
+  crypto_box_keypair(sock->pk, sock->sk);
+  crypto_box_keypair(sock->cpk, sock->csk);
   return fd;
 }
 
@@ -223,7 +224,7 @@ do_accept(rudp_socket_t *sock, short revents) {
         uint8_t pk[crypto_box_PUBLICKEYBYTES], sk[crypto_box_SECRETKEYBYTES];
         crypto_box_keypair(pk, sk);
         memcpy(data.pk, sock->pk, crypto_box_PUBLICKEYBYTES);
-        // tktktk
+
         break;
       }
       case RUDP_INIT: {
@@ -335,12 +336,14 @@ int
 rudp_socket(int type) {
   global_write_lock();
   rudp_global_init();
-
   int fd = create_socket(type);
-
   global_unlock();
-
   return fd;
+}
+
+int
+rudp_setsockopt() {
+  return 0;
 }
 
 #define BASIC_CHECKS if(self.socks == NULL || fd >= RUDP_MAX_SOCKETS || fd >= self.nsocks || self.socks[fd] == NULL){ \
