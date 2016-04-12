@@ -124,12 +124,12 @@ socket_wait_conn(rudp_socket_t *s) {
 
 static void
 socket_signal_close(rudp_socket_t *s) {
-  check(pthread_cond_signal(&s->close) == 0);
+  check(pthread_cond_broadcast(&s->close) == 0);
 }
 
 static void
 socket_signal_conn(rudp_socket_t *s) {
-  check(pthread_cond_signal(&s->conn) == 0);
+  check(pthread_cond_broadcast(&s->conn) == 0);
 }
 
 static int
@@ -232,6 +232,7 @@ do_accept(rudp_socket_t *sock, short revents) {
         int fd = create_socket(addr.sa_family);
         global_unlock();
         if(fd == -1) return;
+        // needs error checks
         rudp_socket_t *new_sock = self.socks[fd];
         connect(new_sock->world, &addr, len);
         struct sockaddr original;
@@ -481,7 +482,6 @@ rudp_listen(int fd, int backlog){
   if(s->state != R_BOUND) { socket_unlock(s); errno = EDESTADDRREQ; return -1; }
   socket_lock(s);
   s->state = R_LISTENING;
-  // TODO: implement backlog
   socket_unlock(s);
   global_unlock();
 
